@@ -47,24 +47,23 @@ body { font-family: 'Microsoft YaHei','PingFang SC',sans-serif; background: var(
 .search-input:focus { outline: 2px solid var(--primary); }
 .table-container { background: var(--card-bg); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); overflow: auto; max-height: 68vh; }
 table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12px; }
-table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+th, td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; padding: 6px 8px; }
 thead th {
-  background: var(--primary); color: white; padding: 7px 4px;
-  text-align: center; font-weight: 600; position: sticky; top: 0; z-index: 2;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: var(--primary); color: white;
+  text-align: left; font-weight: 600; position: sticky; top: 0; z-index: 2;
 }
 tr.row-tracking { background: var(--yellow-bg); }
 tr.row-po { background: var(--red-bg); }
 .part-header td {
-  background: var(--primary-light); padding: 7px 8px; font-weight: 600;
+  background: var(--primary-light); font-weight: 600;
   color: var(--primary); border-bottom: 1px solid var(--border);
 }
 tr.row-tracking .part-header td { background: linear-gradient(to right, var(--primary-light), #fff8e1); }
 tr.row-po .part-header td { background: linear-gradient(to right, var(--primary-light), #ffcdd2); }
-.supplier-row td { padding: 5px 8px; border-bottom: 1px solid #eee; }
+.supplier-row td { border-bottom: 1px solid #eee; }
 .supplier-row .price { color: var(--accent); font-weight: 600; }
 .supplier-row .target { color: var(--primary); font-weight: 600; }
-.editable { cursor: text; min-width: 40px; display: inline-block; padding: 2px 4px; border-radius: 2px; }
+.editable { cursor: text; min-width: 40px; display: inline-block; padding: 2px 0; border-radius: 2px; }
 .editable:hover { background: #fffde7; }
 .editable:focus { outline: 2px solid var(--primary); background: #fffde7; }
 .status-select { font-size: 11px; padding: 2px 4px; border-radius: 3px; border: 1px solid #ccc; background: white; cursor: pointer; font-family: inherit; }
@@ -156,7 +155,7 @@ footer { text-align: center; padding: 14px; font-size: 11px; color: var(--text-l
       </tr>
     </thead>
     <tbody id="tableBody">
-      <tr><td colspan="8" class="loading">正在加载数据</td></tr>
+      <tr><td colspan="9" class="loading">正在加载数据</td></tr>
     </tbody>
   </table>
 </div>
