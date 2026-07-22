@@ -46,10 +46,11 @@ body { font-family: 'Microsoft YaHei','PingFang SC',sans-serif; background: var(
 .search-input { padding: 6px 10px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; width: 180px; font-family: inherit; }
 .search-input:focus { outline: 2px solid var(--primary); }
 .table-container { background: var(--card-bg); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); overflow: auto; max-height: 68vh; }
-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12px; }
 thead th {
-  background: var(--primary); color: white; padding: 7px 8px;
-  text-align: center; font-weight: 600; position: sticky; top: 0; z-index: 2; white-space: nowrap;
+  background: var(--primary); color: white; padding: 7px 4px;
+  text-align: center; font-weight: 600; position: sticky; top: 0; z-index: 2;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 tr.row-tracking { background: var(--yellow-bg); }
 tr.row-po { background: var(--red-bg); }
@@ -129,16 +130,28 @@ footer { text-align: center; padding: 14px; font-size: 11px; color: var(--text-l
 
 <div class="table-container">
   <table id="quotesTable">
+    <colgroup>
+      <col style="width:18%">
+      <col style="width:16%">
+      <col style="width:9%">
+      <col style="width:9%">
+      <col style="width:7%">
+      <col style="width:6%">
+      <col style="width:11%">
+      <col style="width:5%">
+      <col style="width:19%">
+    </colgroup>
     <thead>
       <tr>
-        <th style="width:20%">型号</th>
-        <th style="width:18%">供应商</th>
-        <th style="width:9%">报价 (TP)</th>
-        <th style="width:9%">目标价</th>
-        <th style="width:8%">数量</th>
-        <th style="width:7%">DC</th>
-        <th style="width:12%">状态</th>
-        <th style="width:8%">操作</th>
+        <th>型号</th>
+        <th>供应商</th>
+        <th>报价(TP)</th>
+        <th>目标价</th>
+        <th>数量</th>
+        <th>DC</th>
+        <th>状态</th>
+        <th>操作</th>
+        <th>联系方式</th>
       </tr>
     </thead>
     <tbody id="tableBody">
@@ -204,7 +217,7 @@ async function loadFromCloud() {
   } catch(e) {
     setOnline(false);
     console.error('加载失败:', e);
-    document.getElementById('tableBody').innerHTML = '<tr><td colspan="8" style="text-align:center;padding:30px;color:#c62828;">连接失败: ' + e.message + '<br><small>请检查网络后刷新页面</small></td></tr>';
+    document.getElementById('tableBody').innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;color:#c62828;">连接失败: ' + e.message + '<br><small>请检查网络后刷新页面</small></td></tr>';
     document.getElementById('partCount').textContent = '0';
     document.getElementById('supplierCount').textContent = '0';
     document.getElementById('pricedCount').textContent = '0';
@@ -313,7 +326,7 @@ function renderTable(filterText) {
   let supplierTotal = 0, pricedTotal = 0, trackingTotal = 0, poTotal = 0, partCount = 0;
 
   if (sortedParts.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:30px;color:#999;">暂无数据，点击上方"+ 新型号"开始添加</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;color:#999;">暂无数据，点击上方"+ 新型号"开始添加</td></tr>';
   }
 
   sortedParts.forEach(part => {
@@ -329,28 +342,52 @@ function renderTable(filterText) {
     partCount++;
     suppliers.forEach((s, idx) => {
       const status = s.Status || '';
-      const cls = (idx === 0 ? 'part-header' : 'supplier-row') + (status === 'tracking' ? ' row-tracking' : status === 'po' ? ' row-po' : '');
+      const rowClass = (idx === 0 ? 'part-header' : 'supplier-row');
+      const rowColor = status === 'tracking' ? ' row-tracking' : status === 'po' ? ' row-po' : '';
       supplierTotal++;
       if (s.TP_Price) pricedTotal++;
       if (status === 'tracking') trackingTotal++;
       if (status === 'po') poTotal++;
       const row = document.createElement('tr');
-      row.className = cls;
-      const showPart = idx === 0 ? '<td><span contenteditable="true" class="editable" data-field="Part_Number">' + esc(part) + '</span></td>' : '<td></td>';
-      const badge = (idx > 0 && status === 'tracking') ? '<span class="status-badge tracking">追踪中</span>' :
-                    (idx > 0 && status === 'po') ? '<span class="status-badge po">已下PO</span>' : '';
-      row.innerHTML = showPart +
-        '<td><span contenteditable="true" class="editable" data-field="Supplier_Company">' + esc(s.Supplier_Company||'') + '</span>' + badge + '</td>' +
-        '<td><span contenteditable="true" class="editable ' + (s.TP_Price ? 'price' : '') + '" data-field="TP_Price">' + esc(s.TP_Price||'') + '</span></td>' +
-        '<td><span contenteditable="true" class="editable ' + (s.Target_Price ? 'target' : '') + '" data-field="Target_Price">' + esc(s.Target_Price||'') + '</span></td>' +
-        '<td><span contenteditable="true" class="editable" data-field="Quantity">' + esc(s.Quantity||'') + '</span></td>' +
-        '<td><span contenteditable="true" class="editable" data-field="Year_DateCode">' + esc(s.Year_DateCode||'') + '</span></td>' +
-        '<td>' + statusSelectHTML(part, idx, status) + '</td>' +
-        '<td><button onclick="requestDelete(\'' + esc(part) + '\',' + idx + ')" style="color:#C00000;font-size:12px;border:none;background:none;cursor:pointer;">X</button></td>';
+      row.className = rowClass + rowColor;
+
+      // 型号列：只在分组首行显示，其余行留空占位
+      const partCell = idx === 0
+        ? '<td><span contenteditable="true" class="editable" data-field="Part_Number">' + esc(part) + '</span></td>'
+        : '<td></td>';
+
+      // 供应商列（含状态徽章）
+      let badgeHtml = '';
+      if (status === 'tracking') badgeHtml = ' <span class="status-badge tracking">追踪中</span>';
+      if (status === 'po') badgeHtml = ' <span class="status-badge po">已下PO</span>';
+      const supplierCell = '<td><span contenteditable="true" class="editable" data-field="Supplier_Company">' + esc(s.Supplier_Company||'') + '</span>' + badgeHtml + '</td>';
+
+      // 报价列
+      const tpCell = '<td><span contenteditable="true" class="editable ' + (s.TP_Price ? 'price' : '') + '" data-field="TP_Price">' + esc(s.TP_Price||'') + '</span></td>';
+
+      // 目标价列
+      const targetCell = '<td><span contenteditable="true" class="editable ' + (s.Target_Price ? 'target' : '') + '" data-field="Target_Price">' + esc(s.Target_Price||'') + '</span></td>';
+
+      // 数量列
+      const qtyCell = '<td><span contenteditable="true" class="editable" data-field="Quantity">' + esc(s.Quantity||'') + '</span></td>';
+
+      // DC 列
+      const dcCell = '<td><span contenteditable="true" class="editable" data-field="Year_DateCode">' + esc(s.Year_DateCode||'') + '</span></td>';
+
+      // 状态列
+      const statusCell = '<td>' + statusSelectHTML(part, idx, status) + '</td>';
+
+      // 操作列
+      const actionCell = '<td><button onclick="requestDelete(\'' + esc(part) + '\',' + idx + ')" style="color:#C00000;font-size:12px;border:none;background:none;cursor:pointer;padding:0 4px;">X</button></td>';
+
+      // 联系方式列
+      const contactCell = '<td><span contenteditable="true" class="editable" data-field="Contact_Info" style="font-size:10px;color:#666;max-width:140px;overflow:hidden;text-overflow:ellipsis;display:inline-block;">' + esc(s.Contact_Info||'') + '</span></td>';
+
+      row.innerHTML = partCell + supplierCell + tpCell + targetCell + qtyCell + dcCell + statusCell + actionCell + contactCell;
       tbody.appendChild(row);
     });
     const addRow = document.createElement('tr');
-    addRow.innerHTML = '<td colspan="8"><button class="add-supplier-btn" onclick="addSupplier(\'' + esc(part) + '\')">+ 添加供应商</button></td>';
+    addRow.innerHTML = '<td colspan="9"><button class="add-supplier-btn" onclick="addSupplier(\'' + esc(part) + '\')">+ 添加供应商</button></td>';
     tbody.appendChild(addRow);
   });
 
@@ -383,20 +420,23 @@ function collectFromTable() {
   rows.forEach(row => {
     if (row.querySelector('.add-supplier-btn')) return;
     const cells = row.querySelectorAll('td');
-    if (cells.length < 7) return;
+    if (cells.length < 8) return;
     const isHeader = row.classList.contains('part-header');
     const sel = row.querySelector('.status-select');
     const status = sel ? sel.value : '';
     const supplierText = (cells[1].textContent || '').trim().replace(/追踪中|已下PO/g, '').trim();
+    const contactText = (cells[8] ? (cells[8].textContent || '').trim() : '');
     if (isHeader) {
       currentPart = (cells[0].textContent || '').trim();
       newData.push({ Part_Number: currentPart, Supplier_Company: supplierText,
         TP_Price: (cells[2].textContent||'').trim(), Target_Price: (cells[3].textContent||'').trim(),
-        Quantity: (cells[4].textContent||'').trim(), Year_DateCode: (cells[5].textContent||'').trim(), Status: status });
+        Quantity: (cells[4].textContent||'').trim(), Year_DateCode: (cells[5].textContent||'').trim(),
+        Status: status, Contact_Info: contactText });
     } else if (currentPart) {
       newData.push({ Part_Number: currentPart, Supplier_Company: supplierText,
         TP_Price: (cells[2].textContent||'').trim(), Target_Price: (cells[3].textContent||'').trim(),
-        Quantity: (cells[4].textContent||'').trim(), Year_DateCode: (cells[5].textContent||'').trim(), Status: status });
+        Quantity: (cells[4].textContent||'').trim(), Year_DateCode: (cells[5].textContent||'').trim(),
+        Status: status, Contact_Info: contactText });
     }
   });
   return newData;
@@ -457,9 +497,9 @@ function addNewPart() {
 
 // ==================== 导入导出 ====================
 function exportCSV() {
-  var csv = '型号,供应商,报价(TP),目标价,数量,DC,状态\n';
+  var csv = '型号,供应商,报价(TP),目标价,数量,DC,状态,联系方式\n';
   data.forEach(function(s) {
-    csv += (s.Part_Number||'') + ',' + (s.Supplier_Company||'') + ',' + (s.TP_Price||'') + ',' + (s.Target_Price||'') + ',' + (s.Quantity||'') + ',' + (s.Year_DateCode||'') + ',' + statusLabel(s.Status) + '\n';
+    csv += (s.Part_Number||'') + ',' + (s.Supplier_Company||'') + ',' + (s.TP_Price||'') + ',' + (s.Target_Price||'') + ',' + (s.Quantity||'') + ',' + (s.Year_DateCode||'') + ',' + statusLabel(s.Status) + ',' + (s.Contact_Info||'') + '\n';
   });
   var blob = new Blob(['\ufeff' + csv], {type: 'text/csv;charset=utf-8'});
   downloadBlob(blob, 'IC_报价_' + new Date().toISOString().slice(0,10) + '.csv');
