@@ -47,6 +47,7 @@ body { font-family: 'Microsoft YaHei','PingFang SC',sans-serif; background: var(
 .search-input:focus { outline: 2px solid var(--primary); }
 .table-container { background: var(--card-bg); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); overflow: auto; max-height: 68vh; }
 table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12px; }
+table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
 thead th {
   background: var(--primary); color: white; padding: 7px 4px;
   text-align: center; font-weight: 600; position: sticky; top: 0; z-index: 2;
@@ -131,15 +132,15 @@ footer { text-align: center; padding: 14px; font-size: 11px; color: var(--text-l
 <div class="table-container">
   <table id="quotesTable">
     <colgroup>
-      <col style="width:18%">
+      <col style="width:22%">
       <col style="width:16%">
       <col style="width:9%">
       <col style="width:9%">
       <col style="width:7%">
       <col style="width:6%">
-      <col style="width:11%">
+      <col style="width:10%">
       <col style="width:5%">
-      <col style="width:19%">
+      <col style="width:16%">
     </colgroup>
     <thead>
       <tr>
@@ -289,8 +290,8 @@ async function saveToCloud() {
 function groupByPart() {
   const groups = {};
   data.forEach(d => {
-    const part = d.Part_Number || 'N/A';
-    if (part === 'N/A') return;
+    const part = (d.Part_Number || '').trim();
+    if (!part || part === 'N/A') return;
     if (!groups[part]) groups[part] = [];
     groups[part].push(d);
   });
@@ -420,7 +421,7 @@ function collectFromTable() {
   rows.forEach(row => {
     if (row.querySelector('.add-supplier-btn')) return;
     const cells = row.querySelectorAll('td');
-    if (cells.length < 8) return;
+    if (cells.length < 9) return;
     const isHeader = row.classList.contains('part-header');
     const sel = row.querySelector('.status-select');
     const status = sel ? sel.value : '';
@@ -428,16 +429,13 @@ function collectFromTable() {
     const contactText = (cells[8] ? (cells[8].textContent || '').trim() : '');
     if (isHeader) {
       currentPart = (cells[0].textContent || '').trim();
-      newData.push({ Part_Number: currentPart, Supplier_Company: supplierText,
-        TP_Price: (cells[2].textContent||'').trim(), Target_Price: (cells[3].textContent||'').trim(),
-        Quantity: (cells[4].textContent||'').trim(), Year_DateCode: (cells[5].textContent||'').trim(),
-        Status: status, Contact_Info: contactText });
-    } else if (currentPart) {
-      newData.push({ Part_Number: currentPart, Supplier_Company: supplierText,
-        TP_Price: (cells[2].textContent||'').trim(), Target_Price: (cells[3].textContent||'').trim(),
-        Quantity: (cells[4].textContent||'').trim(), Year_DateCode: (cells[5].textContent||'').trim(),
-        Status: status, Contact_Info: contactText });
     }
+    // 跳过空型号记录，避免保存/显示错位
+    if (!currentPart) return;
+    newData.push({ Part_Number: currentPart, Supplier_Company: supplierText,
+      TP_Price: (cells[2].textContent||'').trim(), Target_Price: (cells[3].textContent||'').trim(),
+      Quantity: (cells[4].textContent||'').trim(), Year_DateCode: (cells[5].textContent||'').trim(),
+      Status: status, Contact_Info: contactText });
   });
   return newData;
 }
