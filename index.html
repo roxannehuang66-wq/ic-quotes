@@ -81,6 +81,17 @@ tr.row-paid.supplier-row td:first-child { background: #c8e6c9; }
 .star-btn.starred { color: var(--star-gold); }
 .star-btn:hover { color: var(--star-gold); }
 
+/* 处理状态按钮 */
+.processed-btn { cursor: pointer; font-size: 10px; padding: 2px 6px; border-radius: 3px; border: 1px solid #ccc; background: #f5f5f5; color: #666; font-family: inherit; transition: all 0.2s; }
+.processed-btn.processed { background: #e8f5e9; color: #2e7d32; border-color: #2e7d32; }
+.processed-btn:hover { opacity: 0.8; }
+
+/* 未处理行高亮 */
+tr.row-unprocessed { background: #fff3e0; }
+tr.row-unprocessed .part-header td { background: linear-gradient(to right, var(--primary-light), #ffe0b2); }
+tr.row-unprocessed.supplier-row td { background: #fff8e1; }
+tr.row-unprocessed.supplier-row td:first-child { background: #ffecb3; }
+
 .supplier-row td { border-bottom: 1px solid #eee; }
 .supplier-row .price { color: var(--accent); font-weight: 600; }
 .supplier-row .target { color: var(--primary); font-weight: 600; }
@@ -134,6 +145,7 @@ footer { text-align: center; padding: 14px; font-size: 11px; color: var(--text-l
     <span>追踪: <b id="trackingCount">-</b></span>
     <span>已PO: <b id="poCount">-</b></span>
     <span>已付款: <b id="paidCount">-</b></span>
+    <span>未处理: <b id="unprocessedCount">-</b></span>
     <span>更新: <span id="updateTime">--</span></span>
     <span class="conn-status"><span class="conn-dot offline" id="connDot"></span><span id="connText">连接中...</span></span>
   </div>
@@ -158,15 +170,16 @@ footer { text-align: center; padding: 14px; font-size: 11px; color: var(--text-l
   <table id="quotesTable">
     <colgroup>
       <col style="width:2%">
-      <col style="width:20%">
-      <col style="width:15%">
+      <col style="width:19%">
+      <col style="width:14%">
       <col style="width:8%">
       <col style="width:8%">
       <col style="width:7%">
       <col style="width:6%">
-      <col style="width:9%">
+      <col style="width:8%">
       <col style="width:6%">
-      <col style="width:15%">
+      <col style="width:6%">
+      <col style="width:14%">
     </colgroup>
     <thead>
       <tr>
@@ -178,6 +191,7 @@ footer { text-align: center; padding: 14px; font-size: 11px; color: var(--text-l
         <th>数量</th>
         <th>DC</th>
         <th>状态</th>
+        <th>处理</th>
         <th>操作</th>
         <th>联系方式</th>
       </tr>
@@ -235,6 +249,7 @@ async function loadFromCloud() {
       Contact_Info: r.contact_info || '',
       Status: r.status || '',
       Starred: r.starred === true || r.starred === 'true' || r.starred === 1,
+      Processed: r.processed === true || r.processed === 'true' || r.processed === 1,
       id: r.id,
     }));
     setOnline(true);
@@ -281,6 +296,7 @@ async function saveToCloud() {
       contact_info: d.Contact_Info || '',
       status: d.Status || '',
       starred: d.Starred === true,
+      processed: d.Processed === true,
     };
     let method = 'POST', url = API_URL;
     if (existingMap[key]) {
@@ -350,7 +366,7 @@ function renderTable(filterText) {
   const groups = groupByPart();
   const sortedParts = Object.keys(groups).sort();
 
-  let supplierTotal = 0, pricedTotal = 0, trackingTotal = 0, poTotal = 0, paidTotal = 0, partCount = 0;
+  let supplierTotal = 0, pricedTotal = 0, trackingTotal = 0, poTotal = 0, paidTotal = 0, partCount = 0, unprocessedTotal = 0;
 
   if (sortedParts.length === 0) {
     tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:30px;color:#999;">暂无数据，点击上方"+ 新型号"开始添加</td></tr>';
@@ -381,6 +397,7 @@ function renderTable(filterText) {
     suppliers.forEach((s, idx) => {
       const status = s.Status || '';
       const starred = s.Starred === true;
+      const processed = s.Processed === true;
       const rowClass = (idx === 0 ? 'part-header' : 'supplier-row');
       let rowColor = '';
       if (status === 'tracking') rowColor = ' row-tracking';
@@ -389,11 +406,15 @@ function renderTable(filterText) {
       if (!rowColor && idx === 0 && groupStatus) {
         rowColor = groupStatus === 'paid' ? ' row-paid' : groupStatus === 'po' ? ' row-po' : ' row-tracking';
       }
+      if (!processed && !rowColor) {
+        rowColor = ' row-unprocessed';
+      }
       supplierTotal++;
       if (s.TP_Price) pricedTotal++;
       if (status === 'tracking') trackingTotal++;
       if (status === 'po') poTotal++;
       if (status === 'paid') paidTotal++;
+      if (!processed) unprocessedTotal++;
       const row = document.createElement('tr');
       row.className = rowClass + rowColor;
 
@@ -417,10 +438,11 @@ function renderTable(filterText) {
       const qtyCell = '<td><span contenteditable="true" class="editable" data-field="Quantity">' + esc(s.Quantity||'') + '</span></td>';
       const dcCell = '<td><span contenteditable="true" class="editable" data-field="Year_DateCode">' + esc(s.Year_DateCode||'') + '</span></td>';
       const statusCell = '<td>' + statusSelectHTML(part, idx, status) + '</td>';
+      const processedCell = '<td style="text-align:center;"><button class="processed-btn' + (processed ? ' processed' : '') + '" onclick="toggleProcessed(\'' + esc(part) + '\',' + idx + ')" title="' + (processed ? '标记为未处理' : '标记为已处理') + '">' + (processed ? '已处理' : '未处理') + '</button></td>';
       const actionCell = '<td><button onclick="requestDelete(\'' + esc(part) + '\',' + idx + ')" style="color:#C00000;font-size:12px;border:none;background:none;cursor:pointer;padding:0 4px;">X</button></td>';
       const contactCell = '<td><span contenteditable="true" class="editable" data-field="Contact_Info" style="font-size:10px;color:#666;max-width:140px;overflow:hidden;text-overflow:ellipsis;display:inline-block;">' + esc(s.Contact_Info||'') + '</span></td>';
 
-      row.innerHTML = starHtml + partCell + supplierCell + tpCell + targetCell + qtyCell + dcCell + statusCell + actionCell + contactCell;
+      row.innerHTML = starHtml + partCell + supplierCell + tpCell + targetCell + qtyCell + dcCell + statusCell + processedCell + actionCell + contactCell;
       tbody.appendChild(row);
     });
     const addRow = document.createElement('tr');
@@ -434,6 +456,7 @@ function renderTable(filterText) {
   document.getElementById('trackingCount').textContent = trackingTotal;
   document.getElementById('poCount').textContent = poTotal;
   document.getElementById('paidCount').textContent = paidTotal;
+  document.getElementById('unprocessedCount').textContent = unprocessedTotal;
   document.getElementById('updateTime').textContent = new Date().toLocaleString('zh-CN');
 }
 
@@ -461,6 +484,16 @@ function toggleStar(part, idx) {
   }
 }
 
+function toggleProcessed(part, idx) {
+  const groups = groupByPart();
+  const suppliers = groups[part];
+  if (suppliers && suppliers[idx]) {
+    suppliers[idx].Processed = !suppliers[idx].Processed;
+    pushHistory('处理状态切换: ' + part);
+    renderTable(document.getElementById('searchInput').value);
+  }
+}
+
 function collectFromTable() {
   const rows = document.querySelectorAll('#tableBody tr');
   const newData = [];
@@ -474,8 +507,10 @@ function collectFromTable() {
     const status = sel ? sel.value : '';
     const starBtn = cells[0].querySelector('.star-btn');
     const starred = starBtn ? starBtn.classList.contains('starred') : false;
+    const processedBtn = cells[8] ? cells[8].querySelector('.processed-btn') : null;
+    const processed = processedBtn ? processedBtn.classList.contains('processed') : false;
     const supplierText = (cells[2].textContent || '').trim().replace(/追踪中|已下PO|已付款/g, '').trim();
-    const contactText = (cells[9] ? (cells[9].textContent || '').trim() : '');
+    const contactText = (cells[10] ? (cells[10].textContent || '').trim() : '');
     if (isHeader) {
       currentPart = (cells[1].textContent || '').trim().replace(/^\u2605/, '').trim();
     }
@@ -483,7 +518,7 @@ function collectFromTable() {
     newData.push({ Part_Number: currentPart, Supplier_Company: supplierText,
       TP_Price: (cells[3].textContent||'').trim(), Target_Price: (cells[4].textContent||'').trim(),
       Quantity: (cells[5].textContent||'').trim(), Year_DateCode: (cells[6].textContent||'').trim(),
-      Status: status, Starred: starred, Contact_Info: contactText });
+      Status: status, Starred: starred, Processed: processed, Contact_Info: contactText });
   });
   return newData;
 }
