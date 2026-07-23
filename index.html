@@ -225,9 +225,9 @@ function apiHeaders(extra) {
   }, extra || {});
 }
 
-// ==================== localStorage 辅助函数（Starred/Processed 元数据） ====================
-// Starred 和 Processed 不在 Supabase 表中，统一存储在 localStorage
-// key = "part_number||supplier_company"，两个页面共用 ic_quotes_meta
+// ==================== localStorage 辅助函数（Starred/Processed 离线回退） ====================
+// Starred 和 Processed 现在已保存到 Supabase；localStorage 仅作为离线/无列时的回退
+// key = "part_number||supplier_company"
 const META_KEY = 'ic_quotes_meta';
 function getLocalMeta() {
   try { return JSON.parse(localStorage.getItem(META_KEY) || '{}'); }
@@ -312,6 +312,9 @@ async function loadFromCloud(silent) {
     data = rows.map(r => {
       var key = metaKey(r.part_number || '', r.supplier_company || '');
       var meta = localMeta[key] || {};
+      // 优先使用 Supabase 中的 starred/processed；若服务端返回没有，再回退到 localStorage
+      var starred = r.starred === true || r.starred === 'true' || r.starred === 1;
+      var processed = r.processed === true || r.processed === 'true' || r.processed === 1;
       return {
         Part_Number: r.part_number || '',
         Supplier_Company: r.supplier_company || '',
@@ -321,8 +324,8 @@ async function loadFromCloud(silent) {
         Year_DateCode: r.year_datecode || '',
         Contact_Info: r.contact_info || '',
         Status: r.status || '',
-        Starred: meta.Starred === true,
-        Processed: meta.Processed === true,
+        Starred: (r.starred !== undefined) ? starred : (meta.Starred === true),
+        Processed: (r.processed !== undefined) ? processed : (meta.Processed === true),
         id: r.id,
       };
     });
@@ -386,7 +389,7 @@ async function saveToCloud() {
     return;
   }
 
-  // Supabase 表中目前没有 starred/processed 列，只保存业务字段
+  // 保存业务字段 + starred/processed 到 Supabase
   const upsertRows = validRows.map(function(r) {
     return {
       part_number: r.part_number,
@@ -397,6 +400,8 @@ async function saveToCloud() {
       year_datecode: r.year_datecode,
       contact_info: r.contact_info,
       status: r.status,
+      starred: r.starred,
+      processed: r.processed,
     };
   });
 
