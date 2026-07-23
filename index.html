@@ -225,6 +225,31 @@ function apiHeaders(extra) {
   }, extra || {});
 }
 
+// ==================== localStorage 辅助函数（Starred/Processed 元数据） ====================
+// Starred 和 Processed 不在 Supabase 表中，统一存储在 localStorage
+// key = "part_number||supplier_company"，两个页面共用 ic_quotes_meta
+const META_KEY = 'ic_quotes_meta';
+function getLocalMeta() {
+  try { return JSON.parse(localStorage.getItem(META_KEY) || '{}'); }
+  catch(e) { return {}; }
+}
+function saveLocalMeta(meta) {
+  try { localStorage.setItem(META_KEY, JSON.stringify(meta)); } catch(e) {}
+}
+function metaKey(part, supplier) {
+  return (part || '').trim() + '||' + (supplier || '').trim();
+}
+function getMeta(part, supplier) {
+  return getLocalMeta()[metaKey(part, supplier)] || {};
+}
+function setMeta(part, supplier, fields) {
+  var meta = getLocalMeta();
+  var key = metaKey(part, supplier);
+  meta[key] = Object.assign(meta[key] || {}, fields);
+  if (Object.keys(meta[key]).length === 0) delete meta[key];
+  saveLocalMeta(meta);
+}
+
 // ==================== 本地缓存（离线/加速） ====================
 const CACHE_KEY = 'ic_quotes_cache_gh';
 function loadCachedData() {
@@ -283,19 +308,24 @@ async function loadFromCloud(silent) {
     });
     if (!resp.ok) throw new Error('HTTP ' + resp.status + ': ' + (await resp.text()).slice(0, 100));
     const rows = await resp.json();
-    data = rows.map(r => ({
-      Part_Number: r.part_number || '',
-      Supplier_Company: r.supplier_company || '',
-      TP_Price: r.tp_price || '',
-      Target_Price: r.target_price || '',
-      Quantity: r.quantity || '',
-      Year_DateCode: r.year_datecode || '',
-      Contact_Info: r.contact_info || '',
-      Status: r.status || '',
-      Starred: r.starred === true || r.starred === 'true' || r.starred === 1,
-      Processed: r.processed === true || r.processed === 'true' || r.processed === 1,
-      id: r.id,
-    }));
+    const localMeta = getLocalMeta();
+    data = rows.map(r => {
+      var key = metaKey(r.part_number || '', r.supplier_company || '');
+      var meta = localMeta[key] || {};
+      return {
+        Part_Number: r.part_number || '',
+        Supplier_Company: r.supplier_company || '',
+        TP_Price: r.tp_price || '',
+        Target_Price: r.target_price || '',
+        Quantity: r.quantity || '',
+        Year_DateCode: r.year_datecode || '',
+        Contact_Info: r.contact_info || '',
+        Status: r.status || '',
+        Starred: meta.Starred === true,
+        Processed: meta.Processed === true,
+        id: r.id,
+      };
+    });
     setOnline(true);
     saveCachedData(data);
     renderTable();
@@ -380,6 +410,14 @@ async function saveToCloud() {
       const errText = await resp.text();
       throw new Error('HTTP ' + resp.status + ': ' + errText.slice(0, 200));
     }
+    // 保存 Starred/Processed 到 localStorage（merge 方式，不覆盖其他记录）
+    newData.forEach(function(d) {
+      setMeta(d.Part_Number, d.Supplier_Company, {
+        Starred: d.Starred === true,
+        Processed: d.Processed === true
+      });
+    });
+
     data = newData;
     saveCachedData(data);
     renderTable();
@@ -547,6 +585,7 @@ function toggleStar(part, idx) {
   const suppliers = groups[part];
   if (suppliers && suppliers[idx]) {
     suppliers[idx].Starred = !suppliers[idx].Starred;
+    setMeta(part, suppliers[idx].Supplier_Company, { Starred: suppliers[idx].Starred });
     pushHistory('星标切换: ' + part);
     renderTable(document.getElementById('searchInput').value);
   }
@@ -557,6 +596,7 @@ function toggleProcessed(part, idx) {
   const suppliers = groups[part];
   if (suppliers && suppliers[idx]) {
     suppliers[idx].Processed = !suppliers[idx].Processed;
+    setMeta(part, suppliers[idx].Supplier_Company, { Processed: suppliers[idx].Processed });
     pushHistory('处理状态切换: ' + part);
     renderTable(document.getElementById('searchInput').value);
   }
