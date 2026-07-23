@@ -11,6 +11,8 @@
   --text: #333; --text-light: #666;
   --yellow-bg: #fff9c4; --yellow-border: #f9a825; --yellow-text: #e65100;
   --red-bg: #ffebee; --red-border: #c62828; --red-text: #b71c1c;
+  --green-bg: #e8f5e9; --green-border: #2e7d32; --green-text: #1b5e20;
+  --star-gold: #f9a825;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: 'Microsoft YaHei','PingFang SC',sans-serif; background: var(--bg); color: var(--text); padding: 12px; }
@@ -26,7 +28,9 @@ body { font-family: 'Microsoft YaHei','PingFang SC',sans-serif; background: var(
 .legend-dot { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
 .legend-dot.yellow { background: var(--yellow-bg); border: 1px solid var(--yellow-border); }
 .legend-dot.red { background: var(--red-bg); border: 1px solid var(--red-border); }
+.legend-dot.green { background: var(--green-bg); border: 1px solid var(--green-border); }
 .legend-dot.normal { background: #fff; border: 1px solid #ccc; }
+
 .toolbar {
   display: flex; justify-content: space-between; align-items: center;
   padding: 10px 14px; background: var(--card-bg); border-radius: 8px;
@@ -45,21 +49,38 @@ body { font-family: 'Microsoft YaHei','PingFang SC',sans-serif; background: var(
 .btn-save:hover { background: #388e3c; }
 .search-input { padding: 6px 10px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; width: 180px; font-family: inherit; }
 .search-input:focus { outline: 2px solid var(--primary); }
-.table-container { background: var(--card-bg); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); overflow: auto; max-height: 68vh; }
+
+.table-container { background: var(--card-bg); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); overflow: auto; max-height: 62vh; }
 table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12px; }
 th, td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; padding: 6px 8px; }
 thead th {
   background: var(--primary); color: white;
   text-align: left; font-weight: 600; position: sticky; top: 0; z-index: 2;
 }
+
 tr.row-tracking { background: var(--yellow-bg); }
 tr.row-po { background: var(--red-bg); }
+tr.row-paid { background: var(--green-bg); }
+
 .part-header td {
   background: var(--primary-light); font-weight: 600;
   color: var(--primary); border-bottom: 1px solid var(--border);
 }
 tr.row-tracking .part-header td { background: linear-gradient(to right, var(--primary-light), #fff8e1); }
 tr.row-po .part-header td { background: linear-gradient(to right, var(--primary-light), #ffcdd2); }
+tr.row-paid .part-header td { background: linear-gradient(to right, var(--primary-light), #c8e6c9); }
+
+tr.row-tracking.supplier-row td { background: #fffde7; }
+tr.row-po.supplier-row td { background: #ffebee; }
+tr.row-paid.supplier-row td { background: #e8f5e9; }
+tr.row-tracking.supplier-row td:first-child { background: #fff8e1; }
+tr.row-po.supplier-row td:first-child { background: #ffcdd2; }
+tr.row-paid.supplier-row td:first-child { background: #c8e6c9; }
+
+.star-btn { cursor: pointer; font-size: 14px; color: #ccc; border: none; background: none; padding: 0 2px; transition: color 0.2s; }
+.star-btn.starred { color: var(--star-gold); }
+.star-btn:hover { color: var(--star-gold); }
+
 .supplier-row td { border-bottom: 1px solid #eee; }
 .supplier-row .price { color: var(--accent); font-weight: 600; }
 .supplier-row .target { color: var(--primary); font-weight: 600; }
@@ -69,11 +90,13 @@ tr.row-po .part-header td { background: linear-gradient(to right, var(--primary-
 .status-select { font-size: 11px; padding: 2px 4px; border-radius: 3px; border: 1px solid #ccc; background: white; cursor: pointer; font-family: inherit; }
 .status-select.opt-tracking { color: var(--yellow-text); background: #fffde7; font-weight: 600; }
 .status-select.opt-po { color: var(--red-text); background: #ffebee; font-weight: 600; }
+.status-select.opt-paid { color: var(--green-text); background: #e8f5e9; font-weight: 600; }
 .add-supplier-btn { display: inline-block; margin: 3px 8px; padding: 2px 8px; font-size: 10px; color: var(--primary); border: 1px dashed var(--primary); border-radius: 3px; cursor: pointer; background: transparent; font-family: inherit; }
 .add-supplier-btn:hover { background: var(--primary-light); }
 .status-badge { display: inline-block; font-size: 9px; padding: 1px 6px; border-radius: 8px; font-weight: 600; margin-left: 4px; }
 .status-badge.tracking { background: #fff9c4; color: #e65100; border: 1px solid #f9a825; }
 .status-badge.po { background: #ffcdd2; color: #b71c1c; border: 1px solid #c62828; }
+.status-badge.paid { background: #c8e6c9; color: #1b5e20; border: 1px solid #2e7d32; }
 .toast {
   position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
   background: #333; color: white; padding: 8px 18px; border-radius: 6px;
@@ -101,6 +124,8 @@ footer { text-align: center; padding: 14px; font-size: 11px; color: var(--text-l
     <div class="legend-item"><span class="legend-dot normal"></span> 普通</div>
     <div class="legend-item"><span class="legend-dot yellow"></span> 追踪中</div>
     <div class="legend-item"><span class="legend-dot red"></span> 已下PO</div>
+    <div class="legend-item"><span class="legend-dot green"></span> 已付款</div>
+    <div class="legend-item"><span style="color:var(--star-gold);font-size:14px;">&#9733;</span> 重点跟进</div>
   </div>
   <div class="meta">
     <span>型号: <b id="partCount">-</b></span>
@@ -108,6 +133,7 @@ footer { text-align: center; padding: 14px; font-size: 11px; color: var(--text-l
     <span>有报价: <b id="pricedCount">-</b></span>
     <span>追踪: <b id="trackingCount">-</b></span>
     <span>已PO: <b id="poCount">-</b></span>
+    <span>已付款: <b id="paidCount">-</b></span>
     <span>更新: <span id="updateTime">--</span></span>
     <span class="conn-status"><span class="conn-dot offline" id="connDot"></span><span id="connText">连接中...</span></span>
   </div>
@@ -131,18 +157,20 @@ footer { text-align: center; padding: 14px; font-size: 11px; color: var(--text-l
 <div class="table-container">
   <table id="quotesTable">
     <colgroup>
-      <col style="width:22%">
-      <col style="width:16%">
-      <col style="width:9%">
-      <col style="width:9%">
+      <col style="width:2%">
+      <col style="width:20%">
+      <col style="width:15%">
+      <col style="width:8%">
+      <col style="width:8%">
       <col style="width:7%">
       <col style="width:6%">
-      <col style="width:10%">
-      <col style="width:5%">
-      <col style="width:16%">
+      <col style="width:9%">
+      <col style="width:6%">
+      <col style="width:15%">
     </colgroup>
     <thead>
       <tr>
+        <th>&#9733;</th>
         <th>型号</th>
         <th>供应商</th>
         <th>报价(TP)</th>
@@ -155,7 +183,7 @@ footer { text-align: center; padding: 14px; font-size: 11px; color: var(--text-l
       </tr>
     </thead>
     <tbody id="tableBody">
-      <tr><td colspan="9" class="loading">正在加载数据</td></tr>
+      <tr><td colspan="10" class="loading">正在加载数据</td></tr>
     </tbody>
   </table>
 </div>
@@ -175,7 +203,6 @@ let data = [];
 let actionHistory = [];
 let MAX_HISTORY = 20;
 
-// ==================== 通用 fetch ====================
 function apiHeaders() {
   return {
     'apikey': SUPABASE_KEY,
@@ -190,7 +217,6 @@ function setOnline(v) {
   document.getElementById('connText').textContent = v ? '在线' : '离线';
 }
 
-// ==================== 云端读写 ====================
 async function loadFromCloud() {
   try {
     document.getElementById('connText').textContent = '连接中...';
@@ -208,6 +234,7 @@ async function loadFromCloud() {
       Year_DateCode: r.year_datecode || '',
       Contact_Info: r.contact_info || '',
       Status: r.status || '',
+      Starred: r.starred === true || r.starred === 'true' || r.starred === 1,
       id: r.id,
     }));
     setOnline(true);
@@ -217,12 +244,13 @@ async function loadFromCloud() {
   } catch(e) {
     setOnline(false);
     console.error('加载失败:', e);
-    document.getElementById('tableBody').innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;color:#c62828;">连接失败: ' + e.message + '<br><small>请检查网络后刷新页面</small></td></tr>';
+    document.getElementById('tableBody').innerHTML = '<tr><td colspan="10" style="text-align:center;padding:30px;color:#c62828;">连接失败: ' + e.message + '<br><small>请检查网络后刷新页面</small></td></tr>';
     document.getElementById('partCount').textContent = '0';
     document.getElementById('supplierCount').textContent = '0';
     document.getElementById('pricedCount').textContent = '0';
     document.getElementById('trackingCount').textContent = '0';
     document.getElementById('poCount').textContent = '0';
+    document.getElementById('paidCount').textContent = '0';
   }
 }
 
@@ -230,7 +258,6 @@ async function saveToCloud() {
   pushHistory('保存前状态');
   const newData = collectFromTable();
 
-  // 获取现有记录
   const resp = await fetch(API_URL + '?select=id,part_number,supplier_company', {
     headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
   });
@@ -253,6 +280,7 @@ async function saveToCloud() {
       year_datecode: d.Year_DateCode || '',
       contact_info: d.Contact_Info || '',
       status: d.Status || '',
+      starred: d.Starred === true,
     };
     let method = 'POST', url = API_URL;
     if (existingMap[key]) {
@@ -265,7 +293,6 @@ async function saveToCloud() {
     if (!r.ok && r.status !== 201 && r.status !== 200) errors++;
   }
 
-  // 删除
   for (const e of existing) {
     const key = e.part_number + '|' + e.supplier_company;
     if (!newKeys.has(key)) {
@@ -285,7 +312,6 @@ async function saveToCloud() {
   }
 }
 
-// ==================== 表格渲染 ====================
 function groupByPart() {
   const groups = {};
   data.forEach(d => {
@@ -302,11 +328,12 @@ function esc(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').
 function statusLabel(s) {
   if (s === 'tracking') return '追踪中';
   if (s === 'po') return '已下PO';
+  if (s === 'paid') return '已付款';
   return '—';
 }
 
 function statusSelectHTML(part, idx, currentStatus) {
-  const opts = [['', '— 普通'], ['tracking', '追踪中'], ['po', '已下PO']];
+  const opts = [['', '— 普通'], ['tracking', '追踪中'], ['po', '已下PO'], ['paid', '已付款']];
   let sel = '<select class="status-select opt-' + (currentStatus || 'normal') + '" onchange="updateStatus(\'' + esc(part) + '\',' + idx + ',this.value)">';
   opts.forEach(([val, label]) => {
     sel += '<option value="' + val + '"' + (val === (currentStatus||'') ? ' selected' : '') + '>' + label + '</option>';
@@ -323,10 +350,10 @@ function renderTable(filterText) {
   const groups = groupByPart();
   const sortedParts = Object.keys(groups).sort();
 
-  let supplierTotal = 0, pricedTotal = 0, trackingTotal = 0, poTotal = 0, partCount = 0;
+  let supplierTotal = 0, pricedTotal = 0, trackingTotal = 0, poTotal = 0, paidTotal = 0, partCount = 0;
 
   if (sortedParts.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;color:#999;">暂无数据，点击上方"+ 新型号"开始添加</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:30px;color:#999;">暂无数据，点击上方"+ 新型号"开始添加</td></tr>';
   }
 
   sortedParts.forEach(part => {
@@ -340,54 +367,64 @@ function renderTable(filterText) {
       if (!matches) return;
     }
     partCount++;
+
+    let groupStatus = '';
+    let groupStarred = false;
+    for (const s of suppliers) {
+      if (s.Starred) groupStarred = true;
+      const st = s.Status || '';
+      if (st === 'paid') groupStatus = 'paid';
+      else if (st === 'po' && groupStatus !== 'paid') groupStatus = 'po';
+      else if (st === 'tracking' && !groupStatus) groupStatus = 'tracking';
+    }
+
     suppliers.forEach((s, idx) => {
       const status = s.Status || '';
+      const starred = s.Starred === true;
       const rowClass = (idx === 0 ? 'part-header' : 'supplier-row');
-      const rowColor = status === 'tracking' ? ' row-tracking' : status === 'po' ? ' row-po' : '';
+      let rowColor = '';
+      if (status === 'tracking') rowColor = ' row-tracking';
+      else if (status === 'po') rowColor = ' row-po';
+      else if (status === 'paid') rowColor = ' row-paid';
+      if (!rowColor && idx === 0 && groupStatus) {
+        rowColor = groupStatus === 'paid' ? ' row-paid' : groupStatus === 'po' ? ' row-po' : ' row-tracking';
+      }
       supplierTotal++;
       if (s.TP_Price) pricedTotal++;
       if (status === 'tracking') trackingTotal++;
       if (status === 'po') poTotal++;
+      if (status === 'paid') paidTotal++;
       const row = document.createElement('tr');
       row.className = rowClass + rowColor;
 
-      // 型号列：只在分组首行显示，其余行留空占位
-      const partCell = idx === 0
-        ? '<td><span contenteditable="true" class="editable" data-field="Part_Number">' + esc(part) + '</span></td>'
-        : '<td></td>';
+      const starHtml = '<td style="text-align:center;"><button class="star-btn' + (starred ? ' starred' : '') + '" onclick="toggleStar(\'' + esc(part) + '\',' + idx + ')" title="' + (starred ? '取消星标' : '设为星标') + '">' + (starred ? '&#9733;' : '&#9734;') + '</button></td>';
 
-      // 供应商列（含状态徽章）
+      let partDisplay = '';
+      if (idx === 0) {
+        if (groupStarred) partDisplay = '<span style="color:var(--star-gold);margin-right:2px;">&#9733;</span>';
+        partDisplay += '<span contenteditable="true" class="editable" data-field="Part_Number">' + esc(part) + '</span>';
+      }
+      const partCell = '<td>' + partDisplay + '</td>';
+
       let badgeHtml = '';
       if (status === 'tracking') badgeHtml = ' <span class="status-badge tracking">追踪中</span>';
       if (status === 'po') badgeHtml = ' <span class="status-badge po">已下PO</span>';
+      if (status === 'paid') badgeHtml = ' <span class="status-badge paid">已付款</span>';
       const supplierCell = '<td><span contenteditable="true" class="editable" data-field="Supplier_Company">' + esc(s.Supplier_Company||'') + '</span>' + badgeHtml + '</td>';
 
-      // 报价列
       const tpCell = '<td><span contenteditable="true" class="editable ' + (s.TP_Price ? 'price' : '') + '" data-field="TP_Price">' + esc(s.TP_Price||'') + '</span></td>';
-
-      // 目标价列
       const targetCell = '<td><span contenteditable="true" class="editable ' + (s.Target_Price ? 'target' : '') + '" data-field="Target_Price">' + esc(s.Target_Price||'') + '</span></td>';
-
-      // 数量列
       const qtyCell = '<td><span contenteditable="true" class="editable" data-field="Quantity">' + esc(s.Quantity||'') + '</span></td>';
-
-      // DC 列
       const dcCell = '<td><span contenteditable="true" class="editable" data-field="Year_DateCode">' + esc(s.Year_DateCode||'') + '</span></td>';
-
-      // 状态列
       const statusCell = '<td>' + statusSelectHTML(part, idx, status) + '</td>';
-
-      // 操作列
       const actionCell = '<td><button onclick="requestDelete(\'' + esc(part) + '\',' + idx + ')" style="color:#C00000;font-size:12px;border:none;background:none;cursor:pointer;padding:0 4px;">X</button></td>';
-
-      // 联系方式列
       const contactCell = '<td><span contenteditable="true" class="editable" data-field="Contact_Info" style="font-size:10px;color:#666;max-width:140px;overflow:hidden;text-overflow:ellipsis;display:inline-block;">' + esc(s.Contact_Info||'') + '</span></td>';
 
-      row.innerHTML = partCell + supplierCell + tpCell + targetCell + qtyCell + dcCell + statusCell + actionCell + contactCell;
+      row.innerHTML = starHtml + partCell + supplierCell + tpCell + targetCell + qtyCell + dcCell + statusCell + actionCell + contactCell;
       tbody.appendChild(row);
     });
     const addRow = document.createElement('tr');
-    addRow.innerHTML = '<td colspan="9"><button class="add-supplier-btn" onclick="addSupplier(\'' + esc(part) + '\')">+ 添加供应商</button></td>';
+    addRow.innerHTML = '<td colspan="10"><button class="add-supplier-btn" onclick="addSupplier(\'' + esc(part) + '\')">+ 添加供应商</button></td>';
     tbody.appendChild(addRow);
   });
 
@@ -396,6 +433,7 @@ function renderTable(filterText) {
   document.getElementById('pricedCount').textContent = pricedTotal;
   document.getElementById('trackingCount').textContent = trackingTotal;
   document.getElementById('poCount').textContent = poTotal;
+  document.getElementById('paidCount').textContent = paidTotal;
   document.getElementById('updateTime').textContent = new Date().toLocaleString('zh-CN');
 }
 
@@ -413,6 +451,16 @@ function updateStatus(part, idx, newStatus) {
   }
 }
 
+function toggleStar(part, idx) {
+  const groups = groupByPart();
+  const suppliers = groups[part];
+  if (suppliers && suppliers[idx]) {
+    suppliers[idx].Starred = !suppliers[idx].Starred;
+    pushHistory('星标切换: ' + part);
+    renderTable(document.getElementById('searchInput').value);
+  }
+}
+
 function collectFromTable() {
   const rows = document.querySelectorAll('#tableBody tr');
   const newData = [];
@@ -420,26 +468,26 @@ function collectFromTable() {
   rows.forEach(row => {
     if (row.querySelector('.add-supplier-btn')) return;
     const cells = row.querySelectorAll('td');
-    if (cells.length < 9) return;
+    if (cells.length < 10) return;
     const isHeader = row.classList.contains('part-header');
     const sel = row.querySelector('.status-select');
     const status = sel ? sel.value : '';
-    const supplierText = (cells[1].textContent || '').trim().replace(/追踪中|已下PO/g, '').trim();
-    const contactText = (cells[8] ? (cells[8].textContent || '').trim() : '');
+    const starBtn = cells[0].querySelector('.star-btn');
+    const starred = starBtn ? starBtn.classList.contains('starred') : false;
+    const supplierText = (cells[2].textContent || '').trim().replace(/追踪中|已下PO|已付款/g, '').trim();
+    const contactText = (cells[9] ? (cells[9].textContent || '').trim() : '');
     if (isHeader) {
-      currentPart = (cells[0].textContent || '').trim();
+      currentPart = (cells[1].textContent || '').trim().replace(/^\u2605/, '').trim();
     }
-    // 跳过空型号记录，避免保存/显示错位
     if (!currentPart) return;
     newData.push({ Part_Number: currentPart, Supplier_Company: supplierText,
-      TP_Price: (cells[2].textContent||'').trim(), Target_Price: (cells[3].textContent||'').trim(),
-      Quantity: (cells[4].textContent||'').trim(), Year_DateCode: (cells[5].textContent||'').trim(),
-      Status: status, Contact_Info: contactText });
+      TP_Price: (cells[3].textContent||'').trim(), Target_Price: (cells[4].textContent||'').trim(),
+      Quantity: (cells[5].textContent||'').trim(), Year_DateCode: (cells[6].textContent||'').trim(),
+      Status: status, Starred: starred, Contact_Info: contactText });
   });
   return newData;
 }
 
-// ==================== 撤回 ====================
 function pushHistory(name) {
   actionHistory.push({ name, snapshot: JSON.stringify(data) });
   if (actionHistory.length > MAX_HISTORY) actionHistory.shift();
@@ -459,7 +507,6 @@ function undoAction() {
   toast('已撤回: ' + last.name);
 }
 
-// ==================== 增删 ====================
 function requestDelete(partNumber, idx) {
   const groups = groupByPart();
   const suppliers = groups[partNumber];
@@ -476,7 +523,7 @@ function addSupplier(partNumber) {
   pushHistory('添加供应商: ' + partNumber);
   data.push({
     Part_Number: partNumber, Supplier_Company: '新供应商',
-    TP_Price: '', Target_Price: '', Quantity: '', Year_DateCode: '', Status: '', Contact_Info: '',
+    TP_Price: '', Target_Price: '', Quantity: '', Year_DateCode: '', Status: '', Starred: false, Contact_Info: '',
   });
   renderTable(document.getElementById('searchInput').value);
 }
@@ -487,16 +534,15 @@ function addNewPart() {
   pushHistory('新增型号: ' + pn);
   data.push({
     Part_Number: pn, Supplier_Company: '待补充',
-    TP_Price: '', Target_Price: '', Quantity: '', Year_DateCode: '', Status: '', Contact_Info: '',
+    TP_Price: '', Target_Price: '', Quantity: '', Year_DateCode: '', Status: '', Starred: false, Contact_Info: '',
   });
   renderTable();
 }
 
-// ==================== 导入导出 ====================
 function exportCSV() {
-  var csv = '型号,供应商,报价(TP),目标价,数量,DC,状态,联系方式\n';
+  var csv = '星标,型号,供应商,报价(TP),目标价,数量,DC,状态,联系方式\n';
   data.forEach(function(s) {
-    csv += (s.Part_Number||'') + ',' + (s.Supplier_Company||'') + ',' + (s.TP_Price||'') + ',' + (s.Target_Price||'') + ',' + (s.Quantity||'') + ',' + (s.Year_DateCode||'') + ',' + statusLabel(s.Status) + ',' + (s.Contact_Info||'') + '\n';
+    csv += (s.Starred ? '★' : '') + ',' + (s.Part_Number||'') + ',' + (s.Supplier_Company||'') + ',' + (s.TP_Price||'') + ',' + (s.Target_Price||'') + ',' + (s.Quantity||'') + ',' + (s.Year_DateCode||'') + ',' + statusLabel(s.Status) + ',' + (s.Contact_Info||'') + '\n';
   });
   var blob = new Blob(['\ufeff' + csv], {type: 'text/csv;charset=utf-8'});
   downloadBlob(blob, 'IC_报价_' + new Date().toISOString().slice(0,10) + '.csv');
@@ -532,6 +578,7 @@ function handleImportFile(event) {
           Year_DateCode: d.Year_DateCode || d.year_datecode || '',
           Contact_Info: d.Contact_Info || d.contact_info || '',
           Status: d.Status || d.status || '',
+          Starred: d.Starred === true || d.starred === true || d.Starred === 'true' || d.starred === 'true' || false,
         };
       });
       renderTable();
@@ -549,7 +596,6 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
-// ==================== Toast ====================
 function toast(msg) {
   var el = document.getElementById('toast');
   el.textContent = msg;
@@ -558,7 +604,6 @@ function toast(msg) {
   el._t = setTimeout(function() { el.classList.remove('show'); }, 2500);
 }
 
-// ==================== 初始化 ====================
 loadFromCloud();
 </script>
 </body>
