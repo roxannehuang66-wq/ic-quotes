@@ -95,7 +95,7 @@ tr.row-unprocessed.supplier-row td:first-child { background: #ffecb3; }
 .supplier-row td { border-bottom: 1px solid #eee; }
 .supplier-row .price { color: var(--accent); font-weight: 600; }
 .supplier-row .target { color: var(--primary); font-weight: 600; }
-.editable { cursor: text; min-width: 40px; display: inline-block; padding: 2px 0; border-radius: 2px; }
+.editable { cursor: text; min-width: 40px; display: inline-block; padding: 2px 0; border-radius: 2px; font-family: inherit; font-size: inherit; color: inherit; }
 .editable:hover { background: #fffde7; }
 .editable:focus { outline: 2px solid var(--primary); background: #fffde7; }
 .status-select { font-size: 11px; padding: 2px 4px; border-radius: 3px; border: 1px solid #ccc; background: white; cursor: pointer; font-family: inherit; }
@@ -925,6 +925,55 @@ function toast(msg) {
 loadFromCloud();
 // 每 30 秒自动从云端同步最新数据
 setInterval(function() { loadFromCloud(true); }, 30000);
+
+// 监听表格内 editable 输入，标记未保存
+var tableEl = document.getElementById('quotesTable');
+if (tableEl) {
+  tableEl.addEventListener('focusin', function(e) {
+    if (e.target.classList.contains('editable') || e.target.classList.contains('status-select')) {
+      // 编辑状态
+    }
+  });
+  tableEl.addEventListener('focusout', function(e) {
+    if (e.target.classList.contains('editable') || e.target.classList.contains('status-select')) {
+      // 编辑结束
+    }
+  });
+  tableEl.addEventListener('input', function(e) {
+    if (e.target.classList.contains('editable')) {
+      markUnsaved();
+    }
+  });
+  // 粘贴时只保留纯文本，统一字体和大小
+  tableEl.addEventListener('paste', function(e) {
+    if (e.target.classList.contains('editable')) {
+      e.preventDefault();
+      var text = (e.clipboardData || window.clipboardData).getData('text/plain');
+      // 使用 insertText 将纯文本插入到光标位置
+      var sel = window.getSelection();
+      if (sel.rangeCount) {
+        sel.deleteFromDocument();
+        sel.getRangeAt(0).insertNode(document.createTextNode(text));
+        sel.collapseToEnd();
+      }
+      markUnsaved();
+    }
+  });
+  // select/status 变更也标记未保存
+  tableEl.addEventListener('change', function(e) {
+    if (e.target.classList.contains('status-select')) {
+      markUnsaved();
+    }
+  });
+}
+
+// 离开页面前警告未保存更改
+window.addEventListener('beforeunload', function(e) {
+  if (hasUnsavedChanges) {
+    e.preventDefault();
+    e.returnValue = '您有未保存的更改，确定要离开吗？';
+  }
+});
 </script>
 </body>
 </html>
