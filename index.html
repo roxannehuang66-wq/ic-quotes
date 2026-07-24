@@ -225,6 +225,31 @@ function apiHeaders(extra) {
   }, extra || {});
 }
 
+// ==================== localStorage 辅助函数（Starred/Processed 离线回退） ====================
+// Starred 和 Processed 现在已保存到 Supabase；localStorage 仅作为离线/无列时的回退
+// key = "part_number||supplier_company"
+const META_KEY = 'ic_quotes_meta';
+function getLocalMeta() {
+  try { return JSON.parse(localStorage.getItem(META_KEY) || '{}'); }
+  catch(e) { return {}; }
+}
+function saveLocalMeta(meta) {
+  try { localStorage.setItem(META_KEY, JSON.stringify(meta)); } catch(e) {}
+}
+function metaKey(part, supplier) {
+  return (part || '').trim() + '||' + (supplier || '').trim();
+}
+function getMeta(part, supplier) {
+  return getLocalMeta()[metaKey(part, supplier)] || {};
+}
+function setMeta(part, supplier, fields) {
+  var meta = getLocalMeta();
+  var key = metaKey(part, supplier);
+  meta[key] = Object.assign(meta[key] || {}, fields);
+  if (Object.keys(meta[key]).length === 0) delete meta[key];
+  saveLocalMeta(meta);
+}
+
 // ==================== 本地缓存（离线/加速） ====================
 const CACHE_KEY = 'ic_quotes_cache_gh';
 function loadCachedData() {
@@ -278,24 +303,33 @@ async function loadFromCloud(silent) {
   try {
     if (!silent) document.getElementById('connText').textContent = '连接中...';
     var cacheBuster = '&_t=' + Date.now();
-    const resp = await fetch(API_URL + '?select=*&order=part_number' + cacheBuster, {
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+    const resp = await fetch(API_URL + '?select=*&order=part_number.asc' + cacheBuster, {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY },
+      cache: 'no-store'
     });
-    if (!resp.ok) throw new Error('HTTP ' + resp.status + ': ' + (await resp.text()).slice(0, 100));
+    if (!resp.ok) throw new Error('HTTP ' + resp.status + ': ' + (await resp.text()).slice(0, 200));
     const rows = await resp.json();
-    data = rows.map(r => ({
-      Part_Number: r.part_number || '',
-      Supplier_Company: r.supplier_company || '',
-      TP_Price: r.tp_price || '',
-      Target_Price: r.target_price || '',
-      Quantity: r.quantity || '',
-      Year_DateCode: r.year_datecode || '',
-      Contact_Info: r.contact_info || '',
-      Status: r.status || '',
-      Starred: r.starred === true || r.starred === 'true' || r.starred === 1,
-      Processed: r.processed === true || r.processed === 'true' || r.processed === 1,
-      id: r.id,
-    }));
+    const localMeta = getLocalMeta();
+    data = rows.map(r => {
+      var key = metaKey(r.part_number || '', r.supplier_company || '');
+      var meta = localMeta[key] || {};
+      // 优先使用 Supabase 中的 starred/processed
+      var starred = (r.starred === true || r.starred === 'true' || r.starred === 1);
+      var processed = (r.processed === true || r.processed === 'true' || r.processed === 1);
+      return {
+        Part_Number: r.part_number || '',
+        Supplier_Company: r.supplier_company || '',
+        TP_Price: r.tp_price || '',
+        Target_Price: r.target_price || '',
+        Quantity: r.quantity || '',
+        Year_DateCode: r.year_datecode || '',
+        Contact_Info: r.contact_info || '',
+        Status: r.status || '',
+        Starred: (r.hasOwnProperty('starred') && r.starred !== null) ? starred : (meta.Starred === true),
+        Processed: (r.hasOwnProperty('processed') && r.processed !== null) ? processed : (meta.Processed === true),
+        id: r.id,
+      };
+    });
     setOnline(true);
     saveCachedData(data);
     renderTable();
@@ -329,7 +363,7 @@ async function saveToCloud() {
   pushHistory('保存前状态');
   const newData = collectFromTable();
 
-  // 过滤空记录
+  // 过滤空记录，同时保留 id 用于后续更新
   const validRows = [];
   for (const d of newData) {
     if (!d.Part_Number || !d.Supplier_Company) continue;
@@ -356,35 +390,69 @@ async function saveToCloud() {
     return;
   }
 
-  // Supabase 表中目前没有 starred/processed 列，只保存业务字段
-  const upsertRows = validRows.map(function(r) {
-    return {
-      part_number: r.part_number,
-      supplier_company: r.supplier_company,
-      tp_price: r.tp_price,
-      target_price: r.target_price,
-      quantity: r.quantity,
-      year_datecode: r.year_datecode,
-      contact_info: r.contact_info,
-      status: r.status,
-    };
-  });
+  // 构建 upsert 数据（含 starred/processed）
+  function buildUpsertRows(rows, includeMeta) {
+    return rows.map(function(r) {
+      var row = {
+        part_number: r.part_number,
+        supplier_company: r.supplier_company,
+        tp_price: r.tp_price,
+        target_price: r.target_price,
+        quantity: r.quantity,
+        year_datecode: r.year_datecode,
+        contact_info: r.contact_info,
+        status: r.status,
+      };
+      if (includeMeta) {
+        row.starred = r.starred;
+        row.processed = r.processed;
+      }
+      return row;
+    });
+  }
 
-  try {
+  async function doSave(rows) {
     const resp = await fetch(API_URL + '?on_conflict=part_number,supplier_company', {
       method: 'POST',
       headers: apiHeaders({ 'Prefer': 'resolution=merge-duplicates' }),
-      body: JSON.stringify(upsertRows)
+      body: JSON.stringify(rows)
     });
     if (!resp.ok) {
       const errText = await resp.text();
+      // 如果是列不存在的错误（starred/processed），尝试去掉后重试
+      if (resp.status === 400 && (errText.indexOf('PGRST204') !== -1 || errText.indexOf('schema cache') !== -1)) {
+        if (errText.indexOf('starred') !== -1 || errText.indexOf('processed') !== -1) {
+          return { retry: true, error: errText };
+        }
+      }
       throw new Error('HTTP ' + resp.status + ': ' + errText.slice(0, 200));
     }
-    data = newData;
-    saveCachedData(data);
-    renderTable();
+    return { ok: true };
+  }
+
+  try {
+    var upsertRows = buildUpsertRows(validRows, true);
+    var result = await doSave(upsertRows);
+
+    // 如果 starred/processed 列不存在，去掉后重试
+    if (result.retry) {
+      console.warn('[Save] starred/processed 列不存在，去掉后重试...');
+      upsertRows = buildUpsertRows(validRows, false);
+      result = await doSave(upsertRows);
+    }
+
+    // 保存 Starred/Processed 到 localStorage（merge 方式，不覆盖其他记录）
+    newData.forEach(function(d) {
+      setMeta(d.Part_Number, d.Supplier_Company, {
+        Starred: d.Starred === true,
+        Processed: d.Processed === true
+      });
+    });
+
+    // 从云端重新加载完整数据，避免因筛选/分页导致 data 丢失其他记录
+    toast('已保存 ' + validRows.length + ' 条记录，正在同步...');
+    await loadFromCloud(true);
     broadcastSync();
-    toast('已保存 ' + validRows.length + ' 条记录到云端');
   } catch(e) {
     console.error('保存失败:', e);
     toast('保存失败: ' + e.message);
@@ -547,6 +615,7 @@ function toggleStar(part, idx) {
   const suppliers = groups[part];
   if (suppliers && suppliers[idx]) {
     suppliers[idx].Starred = !suppliers[idx].Starred;
+    setMeta(part, suppliers[idx].Supplier_Company, { Starred: suppliers[idx].Starred });
     pushHistory('星标切换: ' + part);
     renderTable(document.getElementById('searchInput').value);
   }
@@ -557,6 +626,7 @@ function toggleProcessed(part, idx) {
   const suppliers = groups[part];
   if (suppliers && suppliers[idx]) {
     suppliers[idx].Processed = !suppliers[idx].Processed;
+    setMeta(part, suppliers[idx].Supplier_Company, { Processed: suppliers[idx].Processed });
     pushHistory('处理状态切换: ' + part);
     renderTable(document.getElementById('searchInput').value);
   }
@@ -708,6 +778,8 @@ function toast(msg) {
 }
 
 loadFromCloud();
+// 每 30 秒自动从云端同步最新数据
+setInterval(function() { loadFromCloud(true); }, 30000);
 </script>
 </body>
 </html>
