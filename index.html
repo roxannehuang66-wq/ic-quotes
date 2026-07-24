@@ -302,8 +302,7 @@ async function loadFromCloud(silent) {
 
   try {
     if (!silent) document.getElementById('connText').textContent = '连接中...';
-    var cacheBuster = '&_t=' + Date.now();
-    const resp = await fetch(API_URL + '?select=*&order=part_number.asc' + cacheBuster, {
+    const resp = await fetch(API_URL + '?select=*&order=part_number.asc', {
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY },
       cache: 'no-store'
     });
