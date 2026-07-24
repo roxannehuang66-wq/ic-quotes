@@ -230,7 +230,11 @@ function generateUid() {
 // ==================== 编辑状态管理 ====================
 function isEditing() {
   const active = document.activeElement;
-  return active && (active.isContentEditable || active.tagName === 'INPUT' || active.tagName === 'SELECT' || active.tagName === 'TEXTAREA');
+  if (!active) return false;
+  // contenteditable 元素：属性可能为 "true" 或 "inherit"
+  if (active.getAttribute('contenteditable') === 'true' || active.isContentEditable) return true;
+  if (active.tagName === 'INPUT' || active.tagName === 'SELECT' || active.tagName === 'TEXTAREA') return true;
+  return false;
 }
 
 function markUnsaved() {
@@ -360,6 +364,11 @@ async function loadFromCloud(options) {
     showRefreshPrompt();
     if (!silent) toast('检测到云端更新，请先完成当前编辑并保存，或点击刷新按钮同步');
     return;
+  }
+
+  // 额外保护：即使是手动刷新，也先把当前 DOM 编辑内容同步回 data
+  if (data.length > 0) {
+    try { syncFromTable(); } catch(e) {}
   }
 
   if (!silent) {
@@ -923,8 +932,8 @@ function toast(msg) {
 }
 
 loadFromCloud();
-// 每 30 秒自动从云端同步最新数据
-setInterval(function() { loadFromCloud(true); }, 30000);
+// 每 30 秒自动从云端同步最新数据（如果正在编辑或未保存则跳过）
+setInterval(function() { loadFromCloud({silent: true, auto: true}); }, 30000);
 
 // 监听表格内 editable 输入，标记未保存
 var tableEl = document.getElementById('quotesTable');
