@@ -380,15 +380,6 @@ async function saveToCloud() {
     });
   }
 
-  if (validRows.length === 0) {
-    toast('没有可保存的记录');
-    btn.textContent = originalText;
-    btn.disabled = false;
-    btn.style.opacity = '1';
-    btn.style.pointerEvents = 'auto';
-    return;
-  }
-
   // 构建 upsert 数据（含 starred/processed）
   function buildUpsertRows(rows, includeMeta) {
     return rows.map(function(r) {
@@ -418,7 +409,6 @@ async function saveToCloud() {
     });
     if (!resp.ok) {
       const errText = await resp.text();
-      // 如果是列不存在的错误（starred/processed），尝试去掉后重试
       if (resp.status === 400 && (errText.indexOf('PGRST204') !== -1 || errText.indexOf('schema cache') !== -1)) {
         if (errText.indexOf('starred') !== -1 || errText.indexOf('processed') !== -1) {
           return { retry: true, error: errText };
@@ -429,16 +419,47 @@ async function saveToCloud() {
     return { ok: true };
   }
 
+  // 删除云端有但前端没有的记录
+  async function deleteStaleRecords(frontendKeys) {
+    // 从云端获取全部现有记录
+    const resp = await fetch(API_URL + '?select=id,part_number,supplier_company&order=part_number.asc', {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY },
+      cache: 'no-store'
+    });
+    if (!resp.ok) return 0;
+    const cloudRows = await resp.json();
+    var deleted = 0;
+    for (const cr of cloudRows) {
+      var key = (cr.part_number || '') + '||' + (cr.supplier_company || '');
+      if (!frontendKeys.has(key) && cr.id) {
+        var delResp = await fetch(API_URL + '?id=eq.' + cr.id, {
+          method: 'DELETE',
+          headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Prefer': 'return=minimal' }
+        });
+        if (delResp.ok) deleted++;
+      }
+    }
+    return deleted;
+  }
+
   try {
     var upsertRows = buildUpsertRows(validRows, true);
     var result = await doSave(upsertRows);
 
-    // 如果 starred/processed 列不存在，去掉后重试
     if (result.retry) {
       console.warn('[Save] starred/processed 列不存在，去掉后重试...');
       upsertRows = buildUpsertRows(validRows, false);
       result = await doSave(upsertRows);
     }
+
+    // 构建前端记录 key 集合，用于删除比对
+    var frontendKeys = new Set();
+    validRows.forEach(function(r) {
+      frontendKeys.add(r.part_number + '||' + r.supplier_company);
+    });
+
+    // 删除云端多余记录（被用户在前端删除的）
+    var deletedCount = await deleteStaleRecords(frontendKeys);
 
     // 保存 Starred/Processed 到 localStorage（merge 方式，不覆盖其他记录）
     newData.forEach(function(d) {
@@ -448,8 +469,10 @@ async function saveToCloud() {
       });
     });
 
-    // 从云端重新加载完整数据，避免因筛选/分页导致 data 丢失其他记录
-    toast('已保存 ' + validRows.length + ' 条记录，正在同步...');
+    var msg = '已保存 ' + validRows.length + ' 条记录';
+    if (deletedCount > 0) msg += '，已删除 ' + deletedCount + ' 条';
+    msg += '，正在同步...';
+    toast(msg);
     await loadFromCloud(true);
     broadcastSync();
   } catch(e) {
