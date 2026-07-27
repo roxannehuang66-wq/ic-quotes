@@ -714,38 +714,38 @@ function renderTable(filterText) {
   sortedParts.forEach(part => {
     const suppliers = groups[part];
 
-    // 文本筛选：型号/供应商/报价任意匹配即显示该分组
-    let matchesText = true;
-    if (filterText) {
-      matchesText = suppliers.some(s =>
-        (s.Part_Number||'').toLowerCase().includes(filterText) ||
-        (s.Supplier_Company||'').toLowerCase().includes(filterText) ||
-        (s.TP_Price||'').toLowerCase().includes(filterText)
-      );
-    }
+    // 按行筛选：只保留满足所有筛选条件的供应商
+    const matched = [];
+    suppliers.forEach((s, i) => {
+      const status = (s.Status || 'normal').toLowerCase();
+      const processed = s.Processed === true;
 
-    // 状态筛选：分组内任意供应商满足状态即显示该分组
-    let matchesStatus = true;
-    if (statusFilter) {
-      matchesStatus = suppliers.some(s => (s.Status || 'normal') === statusFilter);
-    }
+      if (statusFilter && status !== statusFilter) return;
 
-    // 处理筛选：分组内任意供应商满足处理状态即显示该分组
-    let matchesProcessed = true;
-    if (processedFilter) {
-      if (processedFilter === 'processed') {
-        matchesProcessed = suppliers.some(s => s.Processed === true);
-      } else if (processedFilter === 'unprocessed') {
-        matchesProcessed = suppliers.some(s => s.Processed !== true);
+      if (processedFilter) {
+        if (processedFilter === 'processed' && !processed) return;
+        if (processedFilter === 'unprocessed' && processed) return;
       }
-    }
 
-    if (!matchesText || !matchesStatus || !matchesProcessed) return;
+      if (filterText) {
+        const t = filterText;
+        if (
+          !(s.Part_Number || '').toLowerCase().includes(t) &&
+          !(s.Supplier_Company || '').toLowerCase().includes(t) &&
+          !(s.TP_Price || '').toLowerCase().includes(t)
+        ) return;
+      }
+
+      matched.push({ supplier: s, originalIdx: i });
+    });
+
+    if (matched.length === 0) return;
     partCount++;
 
     let groupStatus = '';
     let groupStarred = false;
-    for (const s of suppliers) {
+    for (const item of matched) {
+      const s = item.supplier;
       if (s.Starred) groupStarred = true;
       const st = s.Status || '';
       if (st === 'paid') groupStatus = 'paid';
@@ -753,16 +753,16 @@ function renderTable(filterText) {
       else if (st === 'tracking' && !groupStatus) groupStatus = 'tracking';
     }
 
-    suppliers.forEach((s, idx) => {
+    matched.forEach(({ supplier: s, originalIdx }, displayIdx) => {
       const status = s.Status || '';
       const starred = s.Starred === true;
       const processed = s.Processed === true;
-      const rowClass = (idx === 0 ? 'part-header' : 'supplier-row');
+      const rowClass = (displayIdx === 0 ? 'part-header' : 'supplier-row');
       let rowColor = '';
       if (status === 'tracking') rowColor = ' row-tracking';
       else if (status === 'po') rowColor = ' row-po';
       else if (status === 'paid') rowColor = ' row-paid';
-      if (!rowColor && idx === 0 && groupStatus) {
+      if (!rowColor && displayIdx === 0 && groupStatus) {
         rowColor = groupStatus === 'paid' ? ' row-paid' : groupStatus === 'po' ? ' row-po' : ' row-tracking';
       }
       if (!processed && !rowColor) {
@@ -779,10 +779,10 @@ function renderTable(filterText) {
       row.className = rowClass + rowColor;
       row.dataset.uid = s._uid;
 
-      const starHtml = '<td style="text-align:center;"><button class="star-btn' + (starred ? ' starred' : '') + '" onclick="toggleStar(\'' + esc(part) + '\',' + idx + ')" title="' + (starred ? '取消星标' : '设为星标') + '">' + (starred ? '&#9733;' : '&#9734;') + '</button></td>';
+      const starHtml = '<td style="text-align:center;"><button class="star-btn' + (starred ? ' starred' : '') + '" onclick="toggleStar(\'' + esc(part) + '\',' + originalIdx + ')" title="' + (starred ? '取消星标' : '设为星标') + '">' + (starred ? '&#9733;' : '&#9734;') + '</button></td>';
 
       let partDisplay = '';
-      if (idx === 0) {
+      if (displayIdx === 0) {
         if (groupStarred) partDisplay = '<span style="color:var(--star-gold);margin-right:2px;">&#9733;</span>';
         partDisplay += '<span contenteditable="true" class="editable" data-field="Part_Number">' + esc(part) + '</span>';
       }
@@ -798,9 +798,9 @@ function renderTable(filterText) {
       const targetCell = '<td><span contenteditable="true" class="editable ' + (s.Target_Price ? 'target' : '') + '" data-field="Target_Price">' + esc(s.Target_Price||'') + '</span></td>';
       const qtyCell = '<td><span contenteditable="true" class="editable" data-field="Quantity">' + esc(s.Quantity||'') + '</span></td>';
       const dcCell = '<td><span contenteditable="true" class="editable" data-field="Year_DateCode">' + esc(s.Year_DateCode||'') + '</span></td>';
-      const statusCell = '<td>' + statusSelectHTML(part, idx, status) + '</td>';
-      const processedCell = '<td style="text-align:center;"><button class="processed-btn' + (processed ? ' processed' : '') + '" onclick="toggleProcessed(\'' + esc(part) + '\',' + idx + ')" title="' + (processed ? '标记为未处理' : '标记为已处理') + '">' + (processed ? '已处理' : '未处理') + '</button></td>';
-      const actionCell = '<td><button onclick="requestDelete(\'' + esc(part) + '\',' + idx + ')" style="color:#C00000;font-size:12px;border:none;background:none;cursor:pointer;padding:0 4px;">X</button></td>';
+      const statusCell = '<td>' + statusSelectHTML(part, originalIdx, status) + '</td>';
+      const processedCell = '<td style="text-align:center;"><button class="processed-btn' + (processed ? ' processed' : '') + '" onclick="toggleProcessed(\'' + esc(part) + '\',' + originalIdx + ')" title="' + (processed ? '标记为未处理' : '标记为已处理') + '">' + (processed ? '已处理' : '未处理') + '</button></td>';
+      const actionCell = '<td><button onclick="requestDelete(\'' + esc(part) + '\',' + originalIdx + ')" style="color:#C00000;font-size:12px;border:none;background:none;cursor:pointer;padding:0 4px;">X</button></td>';
       const contactCell = '<td><span contenteditable="true" class="editable" data-field="Contact_Info" style="font-size:10px;color:#666;max-width:140px;overflow:hidden;text-overflow:ellipsis;display:inline-block;">' + esc(s.Contact_Info||'') + '</span></td>';
 
       // 备注列
