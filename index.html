@@ -95,7 +95,7 @@ tr.row-unprocessed.supplier-row td:first-child { background: #ffecb3; }
 .supplier-row td { border-bottom: 1px solid #eee; }
 .supplier-row .price { color: var(--accent); font-weight: 600; }
 .supplier-row .target { color: var(--primary); font-weight: 600; }
-.editable { cursor: text; min-width: 40px; display: inline-block; padding: 2px 0; border-radius: 2px; }
+.editable { cursor: text; min-width: 40px; display: inline-block; padding: 2px 0; border-radius: 2px; font-family: inherit; font-size: inherit; color: inherit; }
 .editable:hover { background: #fffde7; }
 .editable:focus { outline: 2px solid var(--primary); background: #fffde7; }
 .status-select { font-size: 11px; padding: 2px 4px; border-radius: 3px; border: 1px solid #ccc; background: white; cursor: pointer; font-family: inherit; }
@@ -154,12 +154,25 @@ footer { text-align: center; padding: 14px; font-size: 11px; color: var(--text-l
 <div class="toolbar">
   <div>
     <input type="text" class="search-input" id="searchInput" placeholder="搜索型号/供应商..." oninput="filterTable()">
+    <select id="statusFilter" onchange="filterTable()" class="search-input" style="width:100px;margin-left:6px;">
+      <option value="">全部状态</option>
+      <option value="normal">普通</option>
+      <option value="tracking">追踪中</option>
+      <option value="po">已下PO</option>
+      <option value="paid">已付款</option>
+    </select>
+    <select id="processedFilter" onchange="filterTable()" class="search-input" style="width:100px;margin-left:6px;">
+      <option value="">全部处理</option>
+      <option value="processed">已处理</option>
+      <option value="unprocessed">未处理</option>
+    </select>
     <button class="btn-outline" onclick="filterTable()">筛选</button>
     <button class="btn-outline" onclick="undoAction()" id="undoBtn" style="opacity:0.4;pointer-events:none;">撤回</button>
   </div>
   <div>
     <button class="btn-primary" onclick="addNewPart()">+ 新型号</button>
     <button class="btn-save" onclick="saveToCloud()">保存到云端</button>
+    <button class="btn-outline" id="refreshBtn" onclick="loadFromCloud({silent: true, force: true})" style="display:none;background:#fff3e0;color:#e65100;border-color:#e65100;">刷新云端数据</button>
     <button class="btn-outline" onclick="exportCSV()">导出CSV</button>
     <button class="btn-outline" onclick="exportBackup()">导出备份</button>
     <button class="btn-outline" onclick="importBackup()">导入备份</button>
@@ -170,16 +183,17 @@ footer { text-align: center; padding: 14px; font-size: 11px; color: var(--text-l
   <table id="quotesTable">
     <colgroup>
       <col style="width:2%">
-      <col style="width:19%">
-      <col style="width:14%">
-      <col style="width:8%">
-      <col style="width:8%">
+      <col style="width:16%">
+      <col style="width:12%">
+      <col style="width:7%">
       <col style="width:7%">
       <col style="width:6%">
-      <col style="width:8%">
-      <col style="width:6%">
-      <col style="width:6%">
-      <col style="width:14%">
+      <col style="width:5%">
+      <col style="width:7%">
+      <col style="width:5%">
+      <col style="width:5%">
+      <col style="width:12%">
+      <col style="width:16%">
     </colgroup>
     <thead>
       <tr>
@@ -194,10 +208,11 @@ footer { text-align: center; padding: 14px; font-size: 11px; color: var(--text-l
         <th>处理</th>
         <th>操作</th>
         <th>联系方式</th>
+        <th>备注</th>
       </tr>
     </thead>
     <tbody id="tableBody">
-      <tr><td colspan="10" class="loading">正在加载数据</td></tr>
+      <tr><td colspan="12" class="loading">正在加载数据</td></tr>
     </tbody>
   </table>
 </div>
@@ -216,6 +231,77 @@ const API_URL = SUPABASE_URL + '/rest/v1/quotes';
 let data = [];
 let actionHistory = [];
 let MAX_HISTORY = 20;
+let hasUnsavedChanges = false;
+let pendingRemoteUpdate = false;
+let isRendering = false;
+let activeEditCount = 0;
+let editBlurTimer = null;
+
+function generateUid() {
+  return 'u_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9);
+}
+
+// ==================== 编辑状态管理 ====================
+// 采用计数器方案：用户 focus 任意可编辑单元格时 +1，blur 后延迟 -1。
+// 这样可以避免焦点短暂丢失时（如点击另一个单元格）触发自动刷新导致编辑丢失。
+function onEditableFocus() {
+  activeEditCount++;
+  if (editBlurTimer) {
+    clearTimeout(editBlurTimer);
+    editBlurTimer = null;
+  }
+  document.body.classList.add('editing-active');
+}
+
+function onEditableBlur() {
+  if (editBlurTimer) clearTimeout(editBlurTimer);
+  editBlurTimer = setTimeout(function() {
+    activeEditCount = Math.max(0, activeEditCount - 1);
+    if (activeEditCount <= 0) {
+      document.body.classList.remove('editing-active');
+      // 编辑结束后若存在待同步的远程更新，提示用户手动刷新
+      if (pendingRemoteUpdate) {
+        showRefreshPrompt();
+        toast('云端/扫描有新数据，请点击刷新按钮同步');
+      }
+    }
+  }, 400);
+}
+
+function isEditing() {
+  return activeEditCount > 0 || hasUnsavedChanges;
+}
+
+function markUnsaved() {
+  if (hasUnsavedChanges) return;
+  hasUnsavedChanges = true;
+  const btn = document.querySelector('.btn-save');
+  if (btn) {
+    btn.textContent = '保存到云端 *';
+    btn.style.background = '#e65100';
+  }
+}
+
+function clearUnsaved() {
+  hasUnsavedChanges = false;
+  pendingRemoteUpdate = false;
+  const btn = document.querySelector('.btn-save');
+  const refreshBtn = document.getElementById('refreshBtn');
+  if (btn) {
+    btn.textContent = '保存到云端';
+    btn.style.background = '#4caf50';
+  }
+  if (refreshBtn) refreshBtn.style.display = 'none';
+}
+
+function showRefreshPrompt() {
+  const refreshBtn = document.getElementById('refreshBtn');
+  if (refreshBtn) refreshBtn.style.display = 'inline-block';
+}
+
+function canAutoRefresh() {
+  return activeEditCount === 0 && !hasUnsavedChanges && !isRendering;
+}
 
 function apiHeaders(extra) {
   return Object.assign({
@@ -269,7 +355,12 @@ if (typeof BroadcastChannel !== 'undefined') {
     syncChannel.onmessage = function(e) {
       if (e.data && e.data.type === 'refresh') {
         console.log('[Sync] BroadcastChannel 收到刷新通知');
-        loadFromCloud(true);
+        if (!canAutoRefresh()) {
+          pendingRemoteUpdate = true;
+          showRefreshPrompt();
+        } else {
+          loadFromCloud({silent: true, auto: true});
+        }
       }
     };
   } catch(e) {}
@@ -281,7 +372,12 @@ function broadcastSync() {
 window.addEventListener('storage', function(e) {
   if (e.key === SYNC_KEY) {
     console.log('[Sync] storage 事件触发刷新');
-    loadFromCloud(true);
+    if (!canAutoRefresh()) {
+      pendingRemoteUpdate = true;
+      showRefreshPrompt();
+    } else {
+      loadFromCloud({silent: true, auto: true});
+    }
   }
 });
 
@@ -290,7 +386,37 @@ function setOnline(v) {
   document.getElementById('connText').textContent = v ? '在线' : '离线';
 }
 
-async function loadFromCloud(silent) {
+async function loadFromCloud(options) {
+  // 兼容旧版 loadFromCloud(true) 调用
+  const opts = (typeof options === 'boolean') ? { silent: options } : (options || {});
+  const silent = opts.silent || false;
+  const auto = opts.auto || false;
+  const force = opts.force || false;
+  const afterSave = opts.afterSave || false;
+
+  // 关键保护：正在编辑或存在未保存更改时，非强制刷新绝不允许覆盖本地数据（保存成功后的重新加载除外）
+  if (!force && !afterSave && !canAutoRefresh()) {
+    pendingRemoteUpdate = true;
+    showRefreshPrompt();
+    if (!silent) toast('检测到云端更新，请先完成当前编辑并保存，再点击刷新同步');
+    return;
+  }
+
+  // 强制刷新但正在编辑/有未保存更改时，让用户选择先保存还是放弃
+  if (force && !canAutoRefresh()) {
+    if (confirm('您有未保存的更改或正在编辑，刷新会丢失这些更改。\n\n点击“确定”先保存，点击“取消”放弃更改并刷新。')) {
+      saveToCloud();
+      return;
+    }
+    // 用户选择放弃本地更改，清除未保存标记后继续刷新
+    clearUnsaved();
+  }
+
+  // 只有在没有未保存更改时，才把 DOM 同步回 data
+  if (data.length > 0 && !hasUnsavedChanges) {
+    try { syncFromTable(); } catch(e) {}
+  }
+
   if (!silent) {
     var cached = loadCachedData();
     if (cached && cached.length) {
@@ -302,14 +428,15 @@ async function loadFromCloud(silent) {
 
   try {
     if (!silent) document.getElementById('connText').textContent = '连接中...';
-    var cacheBuster = '&_t=' + Date.now();
-    const resp = await fetch(API_URL + '?select=*&order=part_number.asc' + cacheBuster, {
+    const resp = await fetch(API_URL + '?select=*&order=part_number.asc', {
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY },
       cache: 'no-store'
     });
     if (!resp.ok) throw new Error('HTTP ' + resp.status + ': ' + (await resp.text()).slice(0, 200));
     const rows = await resp.json();
     const localMeta = getLocalMeta();
+    // 保留本地新增但尚未保存到云端的记录
+    var localOnlyRows = hasUnsavedChanges ? data.filter(function(d) { return !d.id; }) : [];
     data = rows.map(r => {
       var key = metaKey(r.part_number || '', r.supplier_company || '');
       var meta = localMeta[key] || {};
@@ -324,14 +451,21 @@ async function loadFromCloud(silent) {
         Quantity: r.quantity || '',
         Year_DateCode: r.year_datecode || '',
         Contact_Info: r.contact_info || '',
+        Remarks: r.remarks || '',
         Status: r.status || '',
         Starred: (r.hasOwnProperty('starred') && r.starred !== null) ? starred : (meta.Starred === true),
         Processed: (r.hasOwnProperty('processed') && r.processed !== null) ? processed : (meta.Processed === true),
         id: r.id,
+        _uid: generateUid(),
       };
     });
+    // 将本地新增但未保存的记录合并回去，避免被刷新误删
+    if (localOnlyRows.length > 0 && hasUnsavedChanges) {
+      data = data.concat(localOnlyRows);
+    }
     setOnline(true);
     saveCachedData(data);
+    pendingRemoteUpdate = false;
     renderTable();
     if (!silent) {
       if (data.length > 0) toast('已加载 ' + data.length + ' 条记录');
@@ -341,7 +475,7 @@ async function loadFromCloud(silent) {
     setOnline(false);
     console.error('加载失败:', e);
     if (!silent) {
-      document.getElementById('tableBody').innerHTML = '<tr><td colspan="10" style="text-align:center;padding:30px;color:#c62828;">连接失败: ' + e.message + '<br><small>请检查网络后刷新页面</small></td></tr>';
+      document.getElementById('tableBody').innerHTML = '<tr><td colspan="12" style="text-align:center;padding:30px;color:#c62828;">连接失败: ' + e.message + '<br><small>请检查网络后刷新页面</small></td></tr>';
       document.getElementById('partCount').textContent = '0';
       document.getElementById('supplierCount').textContent = '0';
       document.getElementById('pricedCount').textContent = '0';
@@ -353,6 +487,7 @@ async function loadFromCloud(silent) {
 }
 
 async function saveToCloud() {
+  syncFromTable();
   const btn = document.querySelector('.btn-save');
   const originalText = btn.textContent;
   btn.textContent = '保存中...';
@@ -362,6 +497,7 @@ async function saveToCloud() {
 
   pushHistory('保存前状态');
   const newData = collectFromTable();
+  // 注意：不要在这里调用 clearUnsaved()，必须在请求成功后再清除
 
   // 过滤空记录，同时保留 id 用于后续更新
   const validRows = [];
@@ -375,23 +511,17 @@ async function saveToCloud() {
       quantity: d.Quantity || '',
       year_datecode: d.Year_DateCode || '',
       contact_info: d.Contact_Info || '',
+      remarks: d.Remarks || '',
       status: d.Status || '',
       starred: d.Starred === true,
       processed: d.Processed === true,
     });
   }
 
-  if (validRows.length === 0) {
-    toast('没有可保存的记录');
-    btn.textContent = originalText;
-    btn.disabled = false;
-    btn.style.opacity = '1';
-    btn.style.pointerEvents = 'auto';
-    return;
-  }
-
-  // 构建 upsert 数据（含 starred/processed）
-  function buildUpsertRows(rows, includeMeta) {
+  // 构建 upsert 数据（含 starred/processed/remarks）
+  // includeMeta: 是否包含 starred/processed
+  // includeRemarks: 是否包含 remarks（Supabase schema cache 未刷新时可降级）
+  function buildUpsertRows(rows, includeMeta, includeRemarks) {
     return rows.map(function(r) {
       var row = {
         part_number: r.part_number,
@@ -403,6 +533,9 @@ async function saveToCloud() {
         contact_info: r.contact_info,
         status: r.status,
       };
+      if (includeRemarks !== false) {
+        row.remarks = r.remarks;
+      }
       if (includeMeta) {
         row.starred = r.starred;
         row.processed = r.processed;
@@ -419,9 +552,8 @@ async function saveToCloud() {
     });
     if (!resp.ok) {
       const errText = await resp.text();
-      // 如果是列不存在的错误（starred/processed），尝试去掉后重试
       if (resp.status === 400 && (errText.indexOf('PGRST204') !== -1 || errText.indexOf('schema cache') !== -1)) {
-        if (errText.indexOf('starred') !== -1 || errText.indexOf('processed') !== -1) {
+        if (errText.indexOf('starred') !== -1 || errText.indexOf('processed') !== -1 || errText.indexOf('remarks') !== -1) {
           return { retry: true, error: errText };
         }
       }
@@ -430,16 +562,65 @@ async function saveToCloud() {
     return { ok: true };
   }
 
-  try {
-    var upsertRows = buildUpsertRows(validRows, true);
-    var result = await doSave(upsertRows);
-
-    // 如果 starred/processed 列不存在，去掉后重试
-    if (result.retry) {
-      console.warn('[Save] starred/processed 列不存在，去掉后重试...');
-      upsertRows = buildUpsertRows(validRows, false);
-      result = await doSave(upsertRows);
+  // 删除云端有但前端没有的记录（仅在保存成功且无编辑冲突时执行）
+  async function deleteStaleRecords(frontendKeys) {
+    // 从云端获取全部现有记录
+    const resp = await fetch(API_URL + '?select=id,part_number,supplier_company&order=part_number.asc', {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY },
+      cache: 'no-store'
+    });
+    if (!resp.ok) return 0;
+    const cloudRows = await resp.json();
+    var deleted = 0;
+    for (const cr of cloudRows) {
+      var key = (cr.part_number || '') + '||' + (cr.supplier_company || '');
+      if (!frontendKeys.has(key) && cr.id) {
+        var delResp = await fetch(API_URL + '?id=eq.' + cr.id, {
+          method: 'DELETE',
+          headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Prefer': 'return=minimal' }
+        });
+        if (delResp.ok) deleted++;
+      }
     }
+    return deleted;
+  }
+
+  try {
+    var upsertRows = buildUpsertRows(validRows, true, true);
+    var result = await doSave(upsertRows);
+    var savedWithoutRemarks = false;
+    var savedWithoutMeta = false;
+
+    // 第一次重试：根据报错去掉有问题的列
+    if (result.retry) {
+      var retryWithoutMeta = result.error.indexOf('starred') !== -1 || result.error.indexOf('processed') !== -1;
+      var retryWithoutRemarks = result.error.indexOf('remarks') !== -1;
+      console.warn('[Save] schema cache 缺少列，去掉后重试... 错误:', result.error.slice(0, 120));
+      upsertRows = buildUpsertRows(validRows, !retryWithoutMeta, !retryWithoutRemarks);
+      result = await doSave(upsertRows);
+
+      // 如果还有 retry，可能是同时缺多个列，进一步降级
+      if (result.retry) {
+        console.warn('[Save] 继续降级保存...');
+        upsertRows = buildUpsertRows(validRows, false, false);
+        result = await doSave(upsertRows);
+      }
+
+      savedWithoutMeta = upsertRows[0] && upsertRows[0].starred === undefined;
+      savedWithoutRemarks = upsertRows[0] && upsertRows[0].remarks === undefined;
+    }
+
+    // 保存成功后清除未保存标记（按钮恢复绿色）
+    clearUnsaved();
+
+    // 构建前端记录 key 集合，用于删除比对
+    var frontendKeys = new Set();
+    validRows.forEach(function(r) {
+      frontendKeys.add(r.part_number + '||' + r.supplier_company);
+    });
+
+    // 删除云端多余记录（被用户在前端删除的）
+    var deletedCount = await deleteStaleRecords(frontendKeys);
 
     // 保存 Starred/Processed 到 localStorage（merge 方式，不覆盖其他记录）
     newData.forEach(function(d) {
@@ -449,18 +630,30 @@ async function saveToCloud() {
       });
     });
 
-    // 从云端重新加载完整数据，避免因筛选/分页导致 data 丢失其他记录
-    toast('已保存 ' + validRows.length + ' 条记录，正在同步...');
-    await loadFromCloud(true);
+    var msg = '已保存 ' + validRows.length + ' 条记录';
+    if (deletedCount > 0) msg += '，已删除 ' + deletedCount + ' 条';
+    if (savedWithoutRemarks) msg += '（备注字段暂未同步，等 Supabase schema cache 刷新后自动恢复）';
+    if (savedWithoutMeta) msg += '（星标/处理状态暂未同步）';
+    msg += '，正在同步...';
+    toast(msg);
+    await loadFromCloud({silent: true, afterSave: true});
     broadcastSync();
   } catch(e) {
     console.error('保存失败:', e);
     toast('保存失败: ' + e.message);
+    // 保存失败时保持未保存标记，按钮保持橙色，用户可以再次保存
   } finally {
-    btn.textContent = originalText;
     btn.disabled = false;
     btn.style.opacity = '1';
     btn.style.pointerEvents = 'auto';
+    // 根据实际未保存状态恢复按钮文字，避免覆盖 clearUnsaved() 的效果
+    if (hasUnsavedChanges) {
+      btn.textContent = '保存到云端 *';
+      btn.style.background = '#e65100';
+    } else {
+      btn.textContent = '保存到云端';
+      btn.style.background = '#4caf50';
+    }
   }
 }
 
@@ -495,9 +688,19 @@ function statusSelectHTML(part, idx, currentStatus) {
 }
 
 function renderTable(filterText) {
+  isRendering = true;
   const tbody = document.getElementById('tableBody');
   tbody.innerHTML = '';
+  // 自动刷新时保留当前的搜索筛选文字
+  if (filterText === undefined) {
+    const si = document.getElementById('searchInput');
+    filterText = si ? si.value : '';
+  }
   filterText = (filterText || '').toLowerCase();
+
+  // 读取状态和处理筛选条件
+  const statusFilter = (document.getElementById('statusFilter')?.value || '').toLowerCase();
+  const processedFilter = (document.getElementById('processedFilter')?.value || '').toLowerCase();
 
   const groups = groupByPart();
   const sortedParts = Object.keys(groups).sort();
@@ -505,19 +708,39 @@ function renderTable(filterText) {
   let supplierTotal = 0, pricedTotal = 0, trackingTotal = 0, poTotal = 0, paidTotal = 0, partCount = 0, unprocessedTotal = 0;
 
   if (sortedParts.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:30px;color:#999;">暂无数据，点击上方"+ 新型号"开始添加</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;padding:30px;color:#999;">暂无数据，点击上方"+ 新型号"开始添加</td></tr>';
   }
 
   sortedParts.forEach(part => {
     const suppliers = groups[part];
+
+    // 文本筛选：型号/供应商/报价任意匹配即显示该分组
+    let matchesText = true;
     if (filterText) {
-      const matches = suppliers.some(s =>
+      matchesText = suppliers.some(s =>
         (s.Part_Number||'').toLowerCase().includes(filterText) ||
         (s.Supplier_Company||'').toLowerCase().includes(filterText) ||
         (s.TP_Price||'').toLowerCase().includes(filterText)
       );
-      if (!matches) return;
     }
+
+    // 状态筛选：分组内任意供应商满足状态即显示该分组
+    let matchesStatus = true;
+    if (statusFilter) {
+      matchesStatus = suppliers.some(s => (s.Status || 'normal') === statusFilter);
+    }
+
+    // 处理筛选：分组内任意供应商满足处理状态即显示该分组
+    let matchesProcessed = true;
+    if (processedFilter) {
+      if (processedFilter === 'processed') {
+        matchesProcessed = suppliers.some(s => s.Processed === true);
+      } else if (processedFilter === 'unprocessed') {
+        matchesProcessed = suppliers.some(s => s.Processed !== true);
+      }
+    }
+
+    if (!matchesText || !matchesStatus || !matchesProcessed) return;
     partCount++;
 
     let groupStatus = '';
@@ -551,8 +774,10 @@ function renderTable(filterText) {
       if (status === 'po') poTotal++;
       if (status === 'paid') paidTotal++;
       if (!processed) unprocessedTotal++;
+      if (!s._uid) s._uid = generateUid();
       const row = document.createElement('tr');
       row.className = rowClass + rowColor;
+      row.dataset.uid = s._uid;
 
       const starHtml = '<td style="text-align:center;"><button class="star-btn' + (starred ? ' starred' : '') + '" onclick="toggleStar(\'' + esc(part) + '\',' + idx + ')" title="' + (starred ? '取消星标' : '设为星标') + '">' + (starred ? '&#9733;' : '&#9734;') + '</button></td>';
 
@@ -578,11 +803,14 @@ function renderTable(filterText) {
       const actionCell = '<td><button onclick="requestDelete(\'' + esc(part) + '\',' + idx + ')" style="color:#C00000;font-size:12px;border:none;background:none;cursor:pointer;padding:0 4px;">X</button></td>';
       const contactCell = '<td><span contenteditable="true" class="editable" data-field="Contact_Info" style="font-size:10px;color:#666;max-width:140px;overflow:hidden;text-overflow:ellipsis;display:inline-block;">' + esc(s.Contact_Info||'') + '</span></td>';
 
-      row.innerHTML = starHtml + partCell + supplierCell + tpCell + targetCell + qtyCell + dcCell + statusCell + processedCell + actionCell + contactCell;
+      // 备注列
+      const remarksCell = '<td><span contenteditable="true" class="editable" data-field="Remarks" style="font-size:10px;color:#666;max-width:180px;overflow:hidden;text-overflow:ellipsis;display:inline-block;">' + esc(s.Remarks||'') + '</span></td>';
+
+      row.innerHTML = starHtml + partCell + supplierCell + tpCell + targetCell + qtyCell + dcCell + statusCell + processedCell + actionCell + contactCell + remarksCell;
       tbody.appendChild(row);
     });
     const addRow = document.createElement('tr');
-    addRow.innerHTML = '<td colspan="10"><button class="add-supplier-btn" onclick="addSupplier(\'' + esc(part) + '\')">+ 添加供应商</button></td>';
+    addRow.innerHTML = '<td colspan="12"><button class="add-supplier-btn" onclick="addSupplier(\'' + esc(part) + '\')">+ 添加供应商</button></td>';
     tbody.appendChild(addRow);
   });
 
@@ -594,53 +822,71 @@ function renderTable(filterText) {
   document.getElementById('paidCount').textContent = paidTotal;
   document.getElementById('unprocessedCount').textContent = unprocessedTotal;
   document.getElementById('updateTime').textContent = new Date().toLocaleString('zh-CN');
+  isRendering = false;
 }
 
 function filterTable() {
+  syncFromTable();
   renderTable(document.getElementById('searchInput').value);
 }
 
 function updateStatus(part, idx, newStatus) {
+  syncFromTable();
   pushHistory('状态变更: ' + newStatus);
   const groups = groupByPart();
   const suppliers = groups[part];
   if (suppliers && suppliers[idx]) {
     suppliers[idx].Status = newStatus;
+    markUnsaved();
     renderTable(document.getElementById('searchInput').value);
   }
+  onEditableBlur();
 }
 
 function toggleStar(part, idx) {
+  syncFromTable();
   const groups = groupByPart();
   const suppliers = groups[part];
   if (suppliers && suppliers[idx]) {
     suppliers[idx].Starred = !suppliers[idx].Starred;
     setMeta(part, suppliers[idx].Supplier_Company, { Starred: suppliers[idx].Starred });
     pushHistory('星标切换: ' + part);
+    markUnsaved();
     renderTable(document.getElementById('searchInput').value);
   }
+  onEditableBlur();
 }
 
 function toggleProcessed(part, idx) {
+  syncFromTable();
   const groups = groupByPart();
   const suppliers = groups[part];
   if (suppliers && suppliers[idx]) {
     suppliers[idx].Processed = !suppliers[idx].Processed;
     setMeta(part, suppliers[idx].Supplier_Company, { Processed: suppliers[idx].Processed });
     pushHistory('处理状态切换: ' + part);
+    markUnsaved();
     renderTable(document.getElementById('searchInput').value);
   }
+  onEditableBlur();
 }
 
-function collectFromTable() {
+function syncFromTable() {
+  // 在重新渲染或保存前，把 DOM 上可编辑字段的最新值同步回 data 数组
   const rows = document.querySelectorAll('#tableBody tr');
-  const newData = [];
   let currentPart = '';
   rows.forEach(row => {
     if (row.querySelector('.add-supplier-btn')) return;
     const cells = row.querySelectorAll('td');
-    if (cells.length < 10) return;
+    if (cells.length < 12) return;
     const isHeader = row.classList.contains('part-header');
+    const uid = row.dataset.uid;
+    if (isHeader) {
+      currentPart = (cells[1].textContent || '').trim().replace(/^\u2605/, '').trim();
+    }
+    if (!currentPart) return;
+    const item = uid ? data.find(d => d._uid === uid) : null;
+    if (!item) return;
     const sel = row.querySelector('.status-select');
     const status = sel ? sel.value : '';
     const starBtn = cells[0].querySelector('.star-btn');
@@ -649,16 +895,29 @@ function collectFromTable() {
     const processed = processedBtn ? processedBtn.classList.contains('processed') : false;
     const supplierText = (cells[2].textContent || '').trim().replace(/追踪中|已下PO|已付款/g, '').trim();
     const contactText = (cells[10] ? (cells[10].textContent || '').trim() : '');
-    if (isHeader) {
-      currentPart = (cells[1].textContent || '').trim().replace(/^\u2605/, '').trim();
-    }
-    if (!currentPart) return;
-    newData.push({ Part_Number: currentPart, Supplier_Company: supplierText,
-      TP_Price: (cells[3].textContent||'').trim(), Target_Price: (cells[4].textContent||'').trim(),
-      Quantity: (cells[5].textContent||'').trim(), Year_DateCode: (cells[6].textContent||'').trim(),
-      Status: status, Starred: starred, Processed: processed, Contact_Info: contactText });
+    const remarksText = (cells[11] ? (cells[11].textContent || '').trim() : '');
+    item.Part_Number = currentPart;
+    item.Supplier_Company = supplierText;
+    item.TP_Price = (cells[3].textContent||'').trim();
+    item.Target_Price = (cells[4].textContent||'').trim();
+    item.Quantity = (cells[5].textContent||'').trim();
+    item.Year_DateCode = (cells[6].textContent||'').trim();
+    item.Status = status;
+    item.Starred = starred;
+    item.Processed = processed;
+    item.Contact_Info = contactText;
+    item.Remarks = remarksText;
   });
-  return newData;
+}
+
+function collectFromTable() {
+  return data.map(function(d) {
+    const clean = {};
+    for (const k in d) {
+      if (k !== '_uid') clean[k] = d[k];
+    }
+    return clean;
+  });
 }
 
 function pushHistory(name) {
@@ -669,6 +928,7 @@ function pushHistory(name) {
 }
 
 function undoAction() {
+  syncFromTable();
   if (actionHistory.length === 0) return;
   const last = actionHistory.pop();
   data = JSON.parse(last.snapshot);
@@ -681,6 +941,7 @@ function undoAction() {
 }
 
 function requestDelete(partNumber, idx) {
+  syncFromTable();
   const groups = groupByPart();
   const suppliers = groups[partNumber];
   if (!suppliers || !suppliers[idx]) return;
@@ -688,34 +949,73 @@ function requestDelete(partNumber, idx) {
   if (!confirm('确认删除?\n\n型号: ' + item.Part_Number + '\n供应商: ' + item.Supplier_Company + '\n报价: ' + (item.TP_Price || '—'))) return;
   pushHistory('删除: ' + item.Supplier_Company);
   data = data.filter(d => d !== item);
+  markUnsaved();
   renderTable(document.getElementById('searchInput').value);
   toast('已删除（可点撤回恢复）');
 }
 
 function addSupplier(partNumber) {
+  syncFromTable();
   pushHistory('添加供应商: ' + partNumber);
-  data.push({
+  var newItem = {
     Part_Number: partNumber, Supplier_Company: '新供应商',
-    TP_Price: '', Target_Price: '', Quantity: '', Year_DateCode: '', Status: '', Starred: false, Contact_Info: '',
-  });
+    TP_Price: '', Target_Price: '', Quantity: '', Year_DateCode: '', Status: '', Starred: false, Contact_Info: '', Remarks: '',
+    _uid: generateUid(),
+  };
+  data.push(newItem);
+  markUnsaved();
   renderTable(document.getElementById('searchInput').value);
+  // 自动聚焦到新供应商单元格，方便直接编辑，同时提升 activeEditCount 防止自动刷新覆盖
+  setTimeout(function() {
+    var row = document.querySelector('#tableBody tr[data-uid="' + newItem._uid + '"]');
+    if (row) {
+      var supplierSpan = row.querySelector('td:nth-child(3) .editable');
+      if (supplierSpan) {
+        supplierSpan.focus();
+        var range = document.createRange();
+        range.selectNodeContents(supplierSpan);
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    }
+  }, 50);
 }
 
 function addNewPart() {
+  syncFromTable();
   var pn = prompt('请输入新型号 (Part Number):');
   if (!pn) return;
   pushHistory('新增型号: ' + pn);
-  data.push({
+  var newItem = {
     Part_Number: pn, Supplier_Company: '待补充',
-    TP_Price: '', Target_Price: '', Quantity: '', Year_DateCode: '', Status: '', Starred: false, Contact_Info: '',
-  });
+    TP_Price: '', Target_Price: '', Quantity: '', Year_DateCode: '', Status: '', Starred: false, Contact_Info: '', Remarks: '',
+    _uid: generateUid(),
+  };
+  data.push(newItem);
+  markUnsaved();
   renderTable();
+  // 自动聚焦到新型号单元格
+  setTimeout(function() {
+    var row = document.querySelector('#tableBody tr[data-uid="' + newItem._uid + '"]');
+    if (row) {
+      var partSpan = row.querySelector('td:nth-child(2) .editable');
+      if (partSpan) {
+        partSpan.focus();
+        var range = document.createRange();
+        range.selectNodeContents(partSpan);
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    }
+  }, 50);
 }
 
 function exportCSV() {
-  var csv = '星标,型号,供应商,报价(TP),目标价,数量,DC,状态,联系方式\n';
+  var csv = '星标,型号,供应商,报价(TP),目标价,数量,DC,状态,联系方式,备注\n';
   data.forEach(function(s) {
-    csv += (s.Starred ? '★' : '') + ',' + (s.Part_Number||'') + ',' + (s.Supplier_Company||'') + ',' + (s.TP_Price||'') + ',' + (s.Target_Price||'') + ',' + (s.Quantity||'') + ',' + (s.Year_DateCode||'') + ',' + statusLabel(s.Status) + ',' + (s.Contact_Info||'') + '\n';
+    csv += (s.Starred ? '★' : '') + ',' + (s.Part_Number||'') + ',' + (s.Supplier_Company||'') + ',' + (s.TP_Price||'') + ',' + (s.Target_Price||'') + ',' + (s.Quantity||'') + ',' + (s.Year_DateCode||'') + ',' + statusLabel(s.Status) + ',' + (s.Contact_Info||'') + ',' + (s.Remarks||'') + '\n';
   });
   var blob = new Blob(['\ufeff' + csv], {type: 'text/csv;charset=utf-8'});
   downloadBlob(blob, 'IC_报价_' + new Date().toISOString().slice(0,10) + '.csv');
@@ -750,10 +1050,13 @@ function handleImportFile(event) {
           Quantity: d.Quantity || d.quantity || '',
           Year_DateCode: d.Year_DateCode || d.year_datecode || '',
           Contact_Info: d.Contact_Info || d.contact_info || '',
+          Remarks: d.Remarks || d.remarks || '',
           Status: d.Status || d.status || '',
           Starred: d.Starred === true || d.starred === true || d.Starred === 'true' || d.starred === 'true' || false,
+          _uid: generateUid(),
         };
       });
+      markUnsaved();
       renderTable();
       toast('已导入 ' + data.length + ' 条记录（需点"保存到云端"持久化）');
     } catch(err) { alert('解析失败: ' + err.message); }
@@ -778,8 +1081,57 @@ function toast(msg) {
 }
 
 loadFromCloud();
-// 每 30 秒自动从云端同步最新数据
-setInterval(function() { loadFromCloud(true); }, 30000);
+// 每 30 秒自动从云端同步最新数据（如果正在编辑或未保存则跳过）
+setInterval(function() { loadFromCloud({silent: true, auto: true}); }, 30000);
+
+// 监听表格内 editable 输入，标记未保存
+var tableEl = document.getElementById('quotesTable');
+if (tableEl) {
+  tableEl.addEventListener('focusin', function(e) {
+    if (e.target.classList.contains('editable') || e.target.classList.contains('status-select')) {
+      onEditableFocus();
+    }
+  });
+  tableEl.addEventListener('focusout', function(e) {
+    if (e.target.classList.contains('editable') || e.target.classList.contains('status-select')) {
+      onEditableBlur();
+    }
+  });
+  tableEl.addEventListener('input', function(e) {
+    if (e.target.classList.contains('editable')) {
+      markUnsaved();
+    }
+  });
+  // 粘贴时只保留纯文本，统一字体和大小
+  tableEl.addEventListener('paste', function(e) {
+    if (e.target.classList.contains('editable')) {
+      e.preventDefault();
+      var text = (e.clipboardData || window.clipboardData).getData('text/plain');
+      // 使用 insertText 将纯文本插入到光标位置
+      var sel = window.getSelection();
+      if (sel.rangeCount) {
+        sel.deleteFromDocument();
+        sel.getRangeAt(0).insertNode(document.createTextNode(text));
+        sel.collapseToEnd();
+      }
+      markUnsaved();
+    }
+  });
+  // select/status 变更也标记未保存
+  tableEl.addEventListener('change', function(e) {
+    if (e.target.classList.contains('status-select')) {
+      markUnsaved();
+    }
+  });
+}
+
+// 离开页面前警告未保存更改
+window.addEventListener('beforeunload', function(e) {
+  if (hasUnsavedChanges) {
+    e.preventDefault();
+    e.returnValue = '您有未保存的更改，确定要离开吗？';
+  }
+});
 </script>
 </body>
 </html>
