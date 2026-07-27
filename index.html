@@ -154,6 +154,18 @@ footer { text-align: center; padding: 14px; font-size: 11px; color: var(--text-l
 <div class="toolbar">
   <div>
     <input type="text" class="search-input" id="searchInput" placeholder="搜索型号/供应商..." oninput="filterTable()">
+    <select id="statusFilter" onchange="filterTable()" class="search-input" style="width:100px;margin-left:6px;">
+      <option value="">全部状态</option>
+      <option value="normal">普通</option>
+      <option value="tracking">追踪中</option>
+      <option value="po">已下PO</option>
+      <option value="paid">已付款</option>
+    </select>
+    <select id="processedFilter" onchange="filterTable()" class="search-input" style="width:100px;margin-left:6px;">
+      <option value="">全部处理</option>
+      <option value="processed">已处理</option>
+      <option value="unprocessed">未处理</option>
+    </select>
     <button class="btn-outline" onclick="filterTable()">筛选</button>
     <button class="btn-outline" onclick="undoAction()" id="undoBtn" style="opacity:0.4;pointer-events:none;">撤回</button>
   </div>
@@ -679,7 +691,16 @@ function renderTable(filterText) {
   isRendering = true;
   const tbody = document.getElementById('tableBody');
   tbody.innerHTML = '';
+  // 自动刷新时保留当前的搜索筛选文字
+  if (filterText === undefined) {
+    const si = document.getElementById('searchInput');
+    filterText = si ? si.value : '';
+  }
   filterText = (filterText || '').toLowerCase();
+
+  // 读取状态和处理筛选条件
+  const statusFilter = (document.getElementById('statusFilter')?.value || '').toLowerCase();
+  const processedFilter = (document.getElementById('processedFilter')?.value || '').toLowerCase();
 
   const groups = groupByPart();
   const sortedParts = Object.keys(groups).sort();
@@ -692,14 +713,34 @@ function renderTable(filterText) {
 
   sortedParts.forEach(part => {
     const suppliers = groups[part];
+
+    // 文本筛选：型号/供应商/报价任意匹配即显示该分组
+    let matchesText = true;
     if (filterText) {
-      const matches = suppliers.some(s =>
+      matchesText = suppliers.some(s =>
         (s.Part_Number||'').toLowerCase().includes(filterText) ||
         (s.Supplier_Company||'').toLowerCase().includes(filterText) ||
         (s.TP_Price||'').toLowerCase().includes(filterText)
       );
-      if (!matches) return;
     }
+
+    // 状态筛选：分组内任意供应商满足状态即显示该分组
+    let matchesStatus = true;
+    if (statusFilter) {
+      matchesStatus = suppliers.some(s => (s.Status || 'normal') === statusFilter);
+    }
+
+    // 处理筛选：分组内任意供应商满足处理状态即显示该分组
+    let matchesProcessed = true;
+    if (processedFilter) {
+      if (processedFilter === 'processed') {
+        matchesProcessed = suppliers.some(s => s.Processed === true);
+      } else if (processedFilter === 'unprocessed') {
+        matchesProcessed = suppliers.some(s => s.Processed !== true);
+      }
+    }
+
+    if (!matchesText || !matchesStatus || !matchesProcessed) return;
     partCount++;
 
     let groupStatus = '';
