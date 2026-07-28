@@ -155,7 +155,8 @@ footer { text-align: center; padding: 14px; font-size: 11px; color: var(--text-l
 
 <div class="toolbar">
   <div>
-    <input type="text" class="search-input" id="searchInput" placeholder="搜索型号/供应商..." oninput="filterTable()">
+    <input type="text" class="search-input" id="partInput" placeholder="型号（前缀匹配）" oninput="filterTable()" style="width:150px;" title="输入型号前缀即可匹配，如输入 STM32 匹配所有 STM32 开头的型号">
+    <input type="text" class="search-input" id="supplierInput" placeholder="供应商（前缀匹配）" oninput="filterTable()" style="width:160px;margin-left:4px;" title="输入供应商名称前缀即可匹配">
     <select id="statusFilter" onchange="filterTable()" class="search-input" style="width:100px;margin-left:6px;">
       <option value="">全部状态</option>
       <option value="normal">普通</option>
@@ -754,12 +755,10 @@ function renderTable(filterText) {
   isRendering = true;
   const tbody = document.getElementById('tableBody');
   tbody.innerHTML = '';
-  // 自动刷新时保留当前的搜索筛选文字
-  if (filterText === undefined) {
-    const si = document.getElementById('searchInput');
-    filterText = si ? si.value : '';
-  }
-  filterText = (filterText || '').toLowerCase();
+
+  // 型号和供应商分开筛选（前缀匹配）
+  const partFilter = (document.getElementById('partInput')?.value || '').trim().toLowerCase();
+  const supplierFilter = (document.getElementById('supplierInput')?.value || '').trim().toLowerCase();
 
   // 读取状态、处理和时间筛选条件
   const statusFilter = (document.getElementById('statusFilter')?.value || '').toLowerCase();
@@ -817,13 +816,12 @@ function renderTable(filterText) {
         if (rowTime && rowTime < timeCutoff) return;
       }
 
-      if (filterText) {
-        const t = filterText;
-        if (
-          !(s.Part_Number || '').toLowerCase().includes(t) &&
-          !(s.Supplier_Company || '').toLowerCase().includes(t) &&
-          !(s.TP_Price || '').toLowerCase().includes(t)
-        ) return;
+      // 型号和供应商前缀匹配（AND 逻辑，填了哪个就筛选哪个）
+      if (partFilter) {
+        if (!(s.Part_Number || '').toLowerCase().startsWith(partFilter)) return;
+      }
+      if (supplierFilter) {
+        if (!(s.Supplier_Company || '').toLowerCase().startsWith(supplierFilter)) return;
       }
 
       matched.push({ supplier: s, originalIdx: i });
@@ -949,7 +947,7 @@ function renderTable(filterText) {
 
 function filterTable() {
   syncFromTable();
-  renderTable(document.getElementById('searchInput').value);
+  renderTable();
 }
 
 function updateStatus(part, idx, newStatus) {
@@ -960,7 +958,7 @@ function updateStatus(part, idx, newStatus) {
   if (suppliers && suppliers[idx]) {
     suppliers[idx].Status = newStatus;
     markUnsaved();
-    renderTable(document.getElementById('searchInput').value);
+    renderTable();
   }
   onEditableBlur();
 }
@@ -974,7 +972,7 @@ function toggleStar(part, idx) {
     setMeta(part, suppliers[idx].Supplier_Company, { Starred: suppliers[idx].Starred });
     pushHistory('星标切换: ' + part);
     markUnsaved();
-    renderTable(document.getElementById('searchInput').value);
+    renderTable();
   }
   onEditableBlur();
 }
@@ -988,7 +986,7 @@ function toggleProcessed(part, idx) {
     setMeta(part, suppliers[idx].Supplier_Company, { Processed: suppliers[idx].Processed });
     pushHistory('处理状态切换: ' + part);
     markUnsaved();
-    renderTable(document.getElementById('searchInput').value);
+    renderTable();
   }
   onEditableBlur();
 }
@@ -1054,7 +1052,7 @@ function undoAction() {
   if (actionHistory.length === 0) return;
   const last = actionHistory.pop();
   data = JSON.parse(last.snapshot);
-  renderTable(document.getElementById('searchInput').value);
+  renderTable();
   if (actionHistory.length === 0) {
     document.getElementById('undoBtn').style.opacity = '0.4';
     document.getElementById('undoBtn').style.pointerEvents = 'none';
@@ -1072,7 +1070,7 @@ function requestDelete(partNumber, idx) {
   pushHistory('删除: ' + item.Supplier_Company);
   data = data.filter(d => d !== item);
   markUnsaved();
-  renderTable(document.getElementById('searchInput').value);
+  renderTable();
   toast('已删除（可点撤回恢复）');
 }
 
@@ -1086,7 +1084,7 @@ function addSupplier(partNumber) {
   };
   data.push(newItem);
   markUnsaved();
-  renderTable(document.getElementById('searchInput').value);
+  renderTable();
   // 自动聚焦到新供应商单元格，方便直接编辑，同时提升 activeEditCount 防止自动刷新覆盖
   setTimeout(function() {
     var row = document.querySelector('#tableBody tr[data-uid="' + newItem._uid + '"]');
