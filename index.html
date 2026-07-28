@@ -57,6 +57,8 @@ thead th {
   background: var(--primary); color: white;
   text-align: left; font-weight: 600; position: sticky; top: 0; z-index: 2;
 }
+thead th.sortable { cursor: pointer; user-select: none; }
+thead th.sortable:hover { background: #1565c0; }
 
 tr.row-tracking { background: var(--yellow-bg); }
 tr.row-po { background: var(--red-bg); }
@@ -166,6 +168,18 @@ footer { text-align: center; padding: 14px; font-size: 11px; color: var(--text-l
       <option value="processed">已处理</option>
       <option value="unprocessed">未处理</option>
     </select>
+    <select id="timeFilter" onchange="filterTable()" class="search-input" style="width:110px;margin-left:6px;">
+      <option value="all">全部时间</option>
+      <option value="1h">近1小时</option>
+      <option value="3h">近3小时</option>
+      <option value="6h">近6小时</option>
+      <option value="12h">近12小时</option>
+      <option value="24h">近24小时</option>
+      <option value="1d">近1天</option>
+      <option value="3d">近3天</option>
+      <option value="7d" selected>近7天</option>
+      <option value="30d">近30天</option>
+    </select>
     <button class="btn-outline" onclick="filterTable()">筛选</button>
     <button class="btn-outline" onclick="undoAction()" id="undoBtn" style="opacity:0.4;pointer-events:none;">撤回</button>
   </div>
@@ -183,17 +197,18 @@ footer { text-align: center; padding: 14px; font-size: 11px; color: var(--text-l
   <table id="quotesTable">
     <colgroup>
       <col style="width:2%">
-      <col style="width:16%">
-      <col style="width:12%">
-      <col style="width:7%">
-      <col style="width:7%">
+      <col style="width:14%">
+      <col style="width:11%">
+      <col style="width:6%">
       <col style="width:6%">
       <col style="width:5%">
+      <col style="width:5%">
+      <col style="width:8%">
       <col style="width:7%">
       <col style="width:5%">
-      <col style="width:5%">
+      <col style="width:4%">
       <col style="width:12%">
-      <col style="width:16%">
+      <col style="width:15%">
     </colgroup>
     <thead>
       <tr>
@@ -204,6 +219,7 @@ footer { text-align: center; padding: 14px; font-size: 11px; color: var(--text-l
         <th>目标价</th>
         <th>数量</th>
         <th>DC</th>
+        <th class="sortable" onclick="toggleTimeSort()">时间 <span id="timeSortIcon"></span></th>
         <th>状态</th>
         <th>处理</th>
         <th>操作</th>
@@ -212,7 +228,7 @@ footer { text-align: center; padding: 14px; font-size: 11px; color: var(--text-l
       </tr>
     </thead>
     <tbody id="tableBody">
-      <tr><td colspan="12" class="loading">正在加载数据</td></tr>
+      <tr><td colspan="13" class="loading">正在加载数据</td></tr>
     </tbody>
   </table>
 </div>
@@ -236,9 +252,55 @@ let pendingRemoteUpdate = false;
 let isRendering = false;
 let activeEditCount = 0;
 let editBlurTimer = null;
+let timeSortDesc = true;  // 时间排序：默认从新到旧
 
 function generateUid() {
   return 'u_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9);
+}
+
+// 格式化时间显示：ISO时间串 → 简洁中文格式
+function formatTime(isoStr) {
+  if (!isoStr) return '-';
+  try {
+    var d = new Date(isoStr);
+    if (isNaN(d.getTime())) {
+      var cleaned = String(isoStr).replace(/\(.*\)/g, '').trim();
+      d = new Date(cleaned);
+    }
+    if (isNaN(d.getTime())) return String(isoStr).substring(0, 10);
+    var now = new Date();
+    var diffMs = now - d;
+    var diffMin = Math.floor(diffMs / 60000);
+    var diffHr = Math.floor(diffMs / 3600000);
+    if (diffMin < 1) return '刚刚';
+    if (diffMin < 60) return diffMin + '分钟前';
+    if (diffHr < 24) return diffHr + '小时前';
+    var M = d.getMonth() + 1;
+    var day = d.getDate();
+    var h = d.getHours();
+    var m = d.getMinutes();
+    return (M < 10 ? '0' : '') + M + '-' + (day < 10 ? '0' : '') + day + ' ' + (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
+  } catch(e) { return String(isoStr).substring(0, 10); }
+}
+
+// 解析时间字符串为毫秒时间戳
+function parseTimeMs(isoStr) {
+  if (!isoStr) return 0;
+  try {
+    var d = new Date(isoStr);
+    if (!isNaN(d.getTime())) return d.getTime();
+    var cleaned = String(isoStr).replace(/\(.*\)/g, '').trim();
+    d = new Date(cleaned);
+    return isNaN(d.getTime()) ? 0 : d.getTime();
+  } catch(e) { return 0; }
+}
+
+// 时间排序切换
+function toggleTimeSort() {
+  timeSortDesc = !timeSortDesc;
+  var icon = document.getElementById('timeSortIcon');
+  if (icon) icon.textContent = timeSortDesc ? ' ▼' : ' ▲';
+  filterTable();
 }
 
 // ==================== 编辑状态管理 ====================
@@ -455,6 +517,7 @@ async function loadFromCloud(options) {
         Status: r.status || '',
         Starred: (r.hasOwnProperty('starred') && r.starred !== null) ? starred : (meta.Starred === true),
         Processed: (r.hasOwnProperty('processed') && r.processed !== null) ? processed : (meta.Processed === true),
+        Created_At: r.email_date || r.created_at || '',
         id: r.id,
         _uid: generateUid(),
       };
@@ -475,7 +538,7 @@ async function loadFromCloud(options) {
     setOnline(false);
     console.error('加载失败:', e);
     if (!silent) {
-      document.getElementById('tableBody').innerHTML = '<tr><td colspan="12" style="text-align:center;padding:30px;color:#c62828;">连接失败: ' + e.message + '<br><small>请检查网络后刷新页面</small></td></tr>';
+      document.getElementById('tableBody').innerHTML = '<tr><td colspan="13" style="text-align:center;padding:30px;color:#c62828;">连接失败: ' + e.message + '<br><small>请检查网络后刷新页面</small></td></tr>';
       document.getElementById('partCount').textContent = '0';
       document.getElementById('supplierCount').textContent = '0';
       document.getElementById('pricedCount').textContent = '0';
@@ -698,17 +761,38 @@ function renderTable(filterText) {
   }
   filterText = (filterText || '').toLowerCase();
 
-  // 读取状态和处理筛选条件
+  // 读取状态、处理和时间筛选条件
   const statusFilter = (document.getElementById('statusFilter')?.value || '').toLowerCase();
   const processedFilter = (document.getElementById('processedFilter')?.value || '').toLowerCase();
+  const timeFilterVal = document.getElementById('timeFilter')?.value || 'all';
+
+  // 时间筛选：支持小时(h)和天(d)
+  var timeCutoff = 0;
+  if (timeFilterVal !== 'all') {
+    var suffix = timeFilterVal.slice(-1);
+    var tNum = parseInt(timeFilterVal);
+    if (suffix === 'h') timeCutoff = Date.now() - tNum * 3600000;
+    else timeCutoff = Date.now() - tNum * 86400000;
+  }
+
+  // 更新时间排序图标
+  const timeSortIcon = document.getElementById('timeSortIcon');
+  if (timeSortIcon) timeSortIcon.textContent = timeSortDesc ? ' ▼' : ' ▲';
 
   const groups = groupByPart();
-  const sortedParts = Object.keys(groups).sort();
+  // 按型号分组，每组取最大时间用于排序
+  const sortedParts = Object.keys(groups).sort(function(a, b) {
+    var maxA = 0, maxB = 0;
+    (groups[a] || []).forEach(function(s) { var t = parseTimeMs(s.Created_At); if (t > maxA) maxA = t; });
+    (groups[b] || []).forEach(function(s) { var t = parseTimeMs(s.Created_At); if (t > maxB) maxB = t; });
+    if (maxA && maxB) return timeSortDesc ? (maxB - maxA) : (maxA - maxB);
+    return a.localeCompare(b);
+  });
 
   let supplierTotal = 0, pricedTotal = 0, trackingTotal = 0, poTotal = 0, paidTotal = 0, partCount = 0, unprocessedTotal = 0;
 
   if (sortedParts.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;padding:30px;color:#999;">暂无数据，点击上方"+ 新型号"开始添加</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="13" style="text-align:center;padding:30px;color:#999;">暂无数据，点击上方"+ 新型号"开始添加</td></tr>';
   }
 
   sortedParts.forEach(part => {
@@ -727,6 +811,12 @@ function renderTable(filterText) {
         if (processedFilter === 'unprocessed' && processed) return;
       }
 
+      // 时间范围筛选
+      if (timeCutoff > 0) {
+        var rowTime = parseTimeMs(s.Created_At);
+        if (rowTime && rowTime < timeCutoff) return;
+      }
+
       if (filterText) {
         const t = filterText;
         if (
@@ -740,6 +830,14 @@ function renderTable(filterText) {
     });
 
     if (matched.length === 0) return;
+
+    // 按时间排序供应分组内的行
+    matched.sort(function(a, b) {
+      var ta = parseTimeMs(a.supplier.Created_At);
+      var tb = parseTimeMs(b.supplier.Created_At);
+      return timeSortDesc ? (tb - ta) : (ta - tb);
+    });
+
     partCount++;
 
     let groupStatus = '';
@@ -798,6 +896,30 @@ function renderTable(filterText) {
       const targetCell = '<td><span contenteditable="true" class="editable ' + (s.Target_Price ? 'target' : '') + '" data-field="Target_Price">' + esc(s.Target_Price||'') + '</span></td>';
       const qtyCell = '<td><span contenteditable="true" class="editable" data-field="Quantity">' + esc(s.Quantity||'') + '</span></td>';
       const dcCell = '<td><span contenteditable="true" class="editable" data-field="Year_DateCode">' + esc(s.Year_DateCode||'') + '</span></td>';
+
+      // 时间列（可视化颜色标签 + 具体日期）
+      const timeText = formatTime(s.Created_At);
+      const timeMs = parseTimeMs(s.Created_At);
+      var timeColor, timeBg;
+      if (!timeMs) { timeColor = '#999'; timeBg = '#f0f0f0'; }
+      else {
+        var hrDiff = (Date.now() - timeMs) / 3600000;
+        if (hrDiff < 1)      { timeColor = '#2e7d32'; timeBg = '#e8f5e9'; }  // 极新：深绿
+        else if (hrDiff < 6) { timeColor = '#1565c0'; timeBg = '#e3f2fd'; }  // 较新：蓝色
+        else if (hrDiff < 24){ timeColor = '#e65100'; timeBg = '#fff3e0'; }  // 半天内：橙色
+        else                 { timeColor = '#888';    timeBg = '#f5f5f5'; }  // 较旧：灰色
+      }
+      // 具体日期格式化
+      var dateStr = '-';
+      if (timeMs) {
+        var d = new Date(timeMs);
+        dateStr = (d.getMonth()+1) + '/' + d.getDate();
+      }
+      const timeCell = '<td style="font-size:11px;white-space:nowrap;" title="' + esc(s.Created_At||'') + '">' +
+        '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:' + timeColor + ';margin-right:4px;vertical-align:middle;"></span>' +
+        '<span style="font-weight:600;color:' + timeColor + ';vertical-align:middle;">' + dateStr + '</span>' +
+        '<div style="font-size:10px;color:#999;margin-top:1px;padding-left:11px;">' + timeText + '</div></td>';
+
       const statusCell = '<td>' + statusSelectHTML(part, originalIdx, status) + '</td>';
       const processedCell = '<td style="text-align:center;"><button class="processed-btn' + (processed ? ' processed' : '') + '" onclick="toggleProcessed(\'' + esc(part) + '\',' + originalIdx + ')" title="' + (processed ? '标记为未处理' : '标记为已处理') + '">' + (processed ? '已处理' : '未处理') + '</button></td>';
       const actionCell = '<td><button onclick="requestDelete(\'' + esc(part) + '\',' + originalIdx + ')" style="color:#C00000;font-size:12px;border:none;background:none;cursor:pointer;padding:0 4px;">X</button></td>';
@@ -806,11 +928,11 @@ function renderTable(filterText) {
       // 备注列
       const remarksCell = '<td><span contenteditable="true" class="editable" data-field="Remarks" style="font-size:10px;color:#666;max-width:180px;overflow:hidden;text-overflow:ellipsis;display:inline-block;">' + esc(s.Remarks||'') + '</span></td>';
 
-      row.innerHTML = starHtml + partCell + supplierCell + tpCell + targetCell + qtyCell + dcCell + statusCell + processedCell + actionCell + contactCell + remarksCell;
+      row.innerHTML = starHtml + partCell + supplierCell + tpCell + targetCell + qtyCell + dcCell + timeCell + statusCell + processedCell + actionCell + contactCell + remarksCell;
       tbody.appendChild(row);
     });
     const addRow = document.createElement('tr');
-    addRow.innerHTML = '<td colspan="12"><button class="add-supplier-btn" onclick="addSupplier(\'' + esc(part) + '\')">+ 添加供应商</button></td>';
+    addRow.innerHTML = '<td colspan="13"><button class="add-supplier-btn" onclick="addSupplier(\'' + esc(part) + '\')">+ 添加供应商</button></td>';
     tbody.appendChild(addRow);
   });
 
