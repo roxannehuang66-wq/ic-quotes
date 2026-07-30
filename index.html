@@ -169,7 +169,12 @@ footer { text-align: center; padding: 14px; font-size: 11px; color: var(--text-l
       <option value="processed">已处理</option>
       <option value="unprocessed">未处理</option>
     </select>
-    <select id="timeFilter" onchange="filterTable()" class="search-input" style="width:110px;margin-left:6px;">
+    <select id="timeFilterMode" onchange="onTimeFilterModeChange()" class="search-input" style="width:90px;margin-left:6px;" title="切换相对时间/具体日期筛选">
+      <option value="relative" selected>相对时间</option>
+      <option value="specific">具体日期</option>
+    </select>
+    <span id="relativeTimeGroup">
+    <select id="timeFilter" onchange="filterTable()" class="search-input" style="width:100px;">
       <option value="all">全部时间</option>
       <option value="1h">近1小时</option>
       <option value="3h">近3小时</option>
@@ -180,6 +185,20 @@ footer { text-align: center; padding: 14px; font-size: 11px; color: var(--text-l
       <option value="3d">近3天</option>
       <option value="7d" selected>近7天</option>
       <option value="30d">近30天</option>
+    </select>
+    </span>
+    <span id="specificDateGroup" style="display:none;">
+      <select id="dateYear" onchange="onDateSelectChange()" class="search-input" style="width:68px;"></select>
+      <span style="font-size:11px;color:var(--text-light);">年</span>
+      <select id="dateMonth" onchange="onDateSelectChange()" class="search-input" style="width:52px;"></select>
+      <span style="font-size:11px;color:var(--text-light);">月</span>
+      <select id="dateDay" onchange="onDateSelectChange()" class="search-input" style="width:52px;"></select>
+      <span style="font-size:11px;color:var(--text-light);">日</span>
+    </span>
+    <select id="starFilter" onchange="filterTable()" class="search-input" style="width:90px;margin-left:6px;" title="按星标筛选">
+      <option value="">全部星标</option>
+      <option value="starred">已星标</option>
+      <option value="unstarred">未星标</option>
     </select>
     <button class="btn-outline" onclick="filterTable()">筛选</button>
     <button class="btn-outline" onclick="undoAction()" id="undoBtn" style="opacity:0.4;pointer-events:none;">撤回</button>
@@ -721,6 +740,67 @@ async function saveToCloud() {
   }
 }
 
+// ==================== 筛选控制 ====================
+function onTimeFilterModeChange() {
+  var mode = document.getElementById('timeFilterMode').value;
+  var relGroup = document.getElementById('relativeTimeGroup');
+  var specGroup = document.getElementById('specificDateGroup');
+  if (mode === 'specific') {
+    relGroup.style.display = 'none';
+    specGroup.style.display = '';
+    populateDateSelects();
+  } else {
+    relGroup.style.display = '';
+    specGroup.style.display = 'none';
+  }
+  renderTable();
+}
+
+function onDateSelectChange() {
+  renderTable();
+}
+
+function populateDateSelects() {
+  var yearSel = document.getElementById('dateYear');
+  var monthSel = document.getElementById('dateMonth');
+  var daySel = document.getElementById('dateDay');
+
+  var prevYear = yearSel.value;
+  var prevMonth = monthSel.value;
+  var prevDay = daySel.value;
+
+  var years = new Set();
+  var allDates = [];
+  var now = new Date();
+
+  data.forEach(function(d) {
+    var t = parseTimeMs(d.Created_At);
+    if (!t) return;
+    var dt = new Date(t);
+    years.add(dt.getFullYear());
+    allDates.push(dt);
+  });
+
+  if (years.size === 0) years.add(now.getFullYear());
+
+  var yearArr = Array.from(years).sort();
+  yearSel.innerHTML = yearArr.map(function(y) {
+    return '<option value="' + y + '"' + (prevYear === String(y) ? ' selected' : '') + '>' + y + '</option>';
+  }).join('');
+
+  var months = [];
+  for (var m = 1; m <= 12; m++) months.push(m);
+  monthSel.innerHTML = '<option value="">全部</option>' + months.map(function(m) {
+    return '<option value="' + m + '"' + (prevMonth === String(m) ? ' selected' : '') + '>' + m + '</option>';
+  }).join('');
+
+  var days = [];
+  for (var d = 1; d <= 31; d++) days.push(d);
+  daySel.innerHTML = '<option value="">全部</option>' + days.map(function(d) {
+    return '<option value="' + d + '"' + (prevDay === String(d) ? ' selected' : '') + '>' + d + '</option>';
+  }).join('');
+}
+
 function groupByPart() {
   const groups = {};
   data.forEach(d => {
@@ -760,18 +840,50 @@ function renderTable(filterText) {
   const partFilter = (document.getElementById('partInput')?.value || '').trim().toLowerCase();
   const supplierFilter = (document.getElementById('supplierInput')?.value || '').trim().toLowerCase();
 
-  // 读取状态、处理和时间筛选条件
+  // 读取状态、处理、星标和时间筛选条件
   const statusFilter = (document.getElementById('statusFilter')?.value || '').toLowerCase();
   const processedFilter = (document.getElementById('processedFilter')?.value || '').toLowerCase();
-  const timeFilterVal = document.getElementById('timeFilter')?.value || 'all';
+  const starFilterVal = (document.getElementById('starFilter')?.value || '');
+  const timeFilterMode = (document.getElementById('timeFilterMode')?.value || 'relative');
 
-  // 时间筛选：支持小时(h)和天(d)
-  var timeCutoff = 0;
-  if (timeFilterVal !== 'all') {
-    var suffix = timeFilterVal.slice(-1);
-    var tNum = parseInt(timeFilterVal);
-    if (suffix === 'h') timeCutoff = Date.now() - tNum * 3600000;
-    else timeCutoff = Date.now() - tNum * 86400000;
+  // 时间筛选
+  var timeCutoffMin = null;  // 下限（数据时间 >= 此值）
+  var timeCutoffMax = null;  // 上限（数据时间 <= 此值，用于具体日期）
+
+  if (timeFilterMode === 'specific') {
+    // 具体日期模式：构造该天的起止时间戳
+    var selYear = document.getElementById('dateYear')?.value;
+    var selMonth = document.getElementById('dateMonth')?.value;
+    var selDay = document.getElementById('dateDay')?.value;
+
+    if (selYear) {
+      var y = parseInt(selYear);
+      var m = selMonth ? parseInt(selMonth) : 1;
+      var d = selDay ? parseInt(selDay) : 1;
+
+      if (selMonth && selDay) {
+        // 精确到天：该天 00:00:00 ~ 23:59:59
+        timeCutoffMin = new Date(y, m - 1, d, 0, 0, 0).getTime();
+        timeCutoffMax = new Date(y, m - 1, d, 23, 59, 59).getTime();
+      } else if (selMonth) {
+        // 只选到月：该月 1 日 ~ 该月最后一天
+        timeCutoffMin = new Date(y, m - 1, 1, 0, 0, 0).getTime();
+        timeCutoffMax = new Date(y, m, 0, 23, 59, 59).getTime();
+      } else {
+        // 只选到年：该年 1/1 ~ 12/31
+        timeCutoffMin = new Date(y, 0, 1, 0, 0, 0).getTime();
+        timeCutoffMax = new Date(y, 11, 31, 23, 59, 59).getTime();
+      }
+    }
+  } else {
+    // 相对时间模式
+    var timeFilterVal = document.getElementById('timeFilter')?.value || 'all';
+    if (timeFilterVal !== 'all') {
+      var suffix = timeFilterVal.slice(-1);
+      var tNum = parseInt(timeFilterVal);
+      if (suffix === 'h') timeCutoffMin = Date.now() - tNum * 3600000;
+      else timeCutoffMin = Date.now() - tNum * 86400000;
+    }
   }
 
   // 更新时间排序图标
@@ -811,9 +923,18 @@ function renderTable(filterText) {
       }
 
       // 时间范围筛选
-      if (timeCutoff > 0) {
-        var rowTime = parseTimeMs(s.Created_At);
-        if (rowTime && rowTime < timeCutoff) return;
+      var rowTime = parseTimeMs(s.Created_At);
+      if (timeCutoffMin !== null || timeCutoffMax !== null) {
+        if (!rowTime) return;
+        if (timeCutoffMin !== null && rowTime < timeCutoffMin) return;
+        if (timeCutoffMax !== null && rowTime > timeCutoffMax) return;
+      }
+
+      // 星标筛选
+      if (starFilterVal) {
+        var isStarred = s.Starred === true;
+        if (starFilterVal === 'starred' && !isStarred) return;
+        if (starFilterVal === 'unstarred' && isStarred) return;
       }
 
       // 型号和供应商前缀匹配（AND 逻辑，填了哪个就筛选哪个）
